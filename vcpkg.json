@@ -1,0 +1,21 @@
+{
+  "dependencies": [
+    "glew",
+    "glfw3",
+    "lcms",
+    "opencolorio",
+    {
+      "name": "openimageio",
+      "features": [
+        "opencolorio"
+      ]
+    },
+    {
+      "name": "imgui",
+      "features": [
+        "glfw-binding",
+        "opengl3-binding"
+      ]
+    }
+  ]
+}
