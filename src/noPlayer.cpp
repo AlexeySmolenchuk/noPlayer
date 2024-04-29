@@ -138,6 +138,7 @@ private:
 	)glsl";
 
 	float gain = 1.0;
+	float offset_value = 0.0;
 	int channel_soloing = 0;
 	bool inspect = false;
 
@@ -457,7 +458,10 @@ void NoPlayer::draw()
 		ui = !ui;
 
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_0)))
+	{
 		gain = 1.0;
+		offset_value = 0;
+	}
 
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Equal)))
 		gain *= 2.0;
@@ -585,25 +589,35 @@ void NoPlayer::draw()
 			ImGui::PopStyleColor();
 		}
 		ImGui::PopStyleColor(3);
-
 		ImGui::End();
-	}
 
-	{
-		ImGui::SetNextWindowPos(ImVec2(500, 500));
-		ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration
-									| ImGuiWindowFlags_NoBackground
-									// | ImGuiWindowFlags_AlwaysAutoResize
-									;
+		{
+			ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.5, 0.5, 0.5, 0.05));
+			ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.5, 0.5, 0.5, 0.1));
+			ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.5, 0.5, 0.5, 0.15));
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5, 0.5, 0.5, 1.0));
+			ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, ImVec4(0.5, 0.5, 0.5, 0.1));
 
-		ImGui::Begin( "CC", nullptr, window_flags);
-		gain = std::clamp( gain, -1000000.f, 1000000.f);
-		ImGui::DragFloat("Gain", &gain, std::max(0.00001, std::abs(gain)*0.02));
-		// ImGui::SameLine();
-		static float offset=0;
-		offset = std::clamp( offset, -1000000.f, 1000000.f);
-		ImGui::DragFloat("Offset", &offset, std::max(0.00001, std::abs(offset)*0.02));
-		ImGui::End();
+
+			ImGui::SetNextWindowPos(ImVec2(display_w/2-80, display_h - 60));
+			ImGui::SetNextWindowSize(ImVec2(160, 60));
+
+			ImGuiWindowFlags window_flags = ImGuiWindowFlags_None
+										| ImGuiWindowFlags_NoDecoration
+										| ImGuiWindowFlags_NoBackground
+										;
+
+			ImGui::Begin( "CC", nullptr, window_flags);
+
+			gain = std::clamp( gain, -1000000.f, 1000000.f);
+			ImGui::DragFloat("Gain", &gain, std::max(0.00001, std::abs(gain)*0.02));
+
+			offset_value = std::clamp( offset_value, -1000000.f, 1000000.f);
+			ImGui::DragFloat("Offset", &offset_value, std::max(0.00001, std::abs(offset_value)*0.02));
+
+			ImGui::PopStyleColor(5);
+			ImGui::End();
+		}
 	}
 
 	if(plane.ready != 3)
@@ -675,6 +689,7 @@ void NoPlayer::draw()
 														scale * factor * compensate * plane.image_height/(float)display_h);
 
 	glUniform1f(glGetUniformLocation(shader, "gain"), gain);
+	glUniform1f(glGetUniformLocation(shader, "offset_value"), offset_value);
 	glUniform1i(glGetUniformLocation(shader, "soloing"), channel_soloing);
 
 	glDisable(GL_DEPTH_TEST); // prevents framebuffer rectangle from being discarded
@@ -1003,6 +1018,7 @@ void NoPlayer::configureOCIO()
 		in vec2 texCoords;
 		uniform sampler2D textureSampler;
 		uniform float gain;
+		uniform float offset_value;
 		uniform int soloing;
 	)glsl" +
 	std::string(shaderDesc->getShaderText()) +
@@ -1015,6 +1031,7 @@ void NoPlayer::configureOCIO()
 					fragment[i]=0.0;
 			}
 			fragment *= gain;
+			fragment += vec4(offset_value);
 			FragColor = OCIODisplay(fragment);
 			if (soloing!=0){
 				switch (soloing) {
