@@ -29,7 +29,6 @@ namespace OCIO = OCIO_NAMESPACE;
 	int internal_format[] = {0, GL_R16F, GL_RG16F, GL_RGB16F, GL_RGBA16F};
 #endif()
 
-int data_format[] = {0, GL_RED, GL_RG, GL_RGB, GL_RGBA};
 
 class NoPlayer
 {
@@ -66,6 +65,9 @@ class NoPlayer
 		precision *pixels;		// fill deferred
 		GLuint glTexture;	// fill deferred
 		int ready = 0;
+
+		float gain_values = 1.0;
+		float offset_values = 0.0;
 
 	};
 
@@ -137,8 +139,6 @@ private:
 		}
 	)glsl";
 
-	float gain = 1.0;
-	float offset_value = 0.0;
 	int channel_soloing = 0;
 	bool inspect = false;
 
@@ -459,15 +459,15 @@ void NoPlayer::draw()
 
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_0)))
 	{
-		gain = 1.0;
-		offset_value = 0;
+		plane.gain_values = 1.0;
+		plane.offset_values = 0.0;
 	}
 
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Equal)))
-		gain *= 2.0;
+		plane.gain_values *= 2.0;
 
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Minus)))
-		gain *= 0.5;
+		plane.gain_values *= 0.5;
 
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_I)))
 		inspect = !inspect;
@@ -609,11 +609,11 @@ void NoPlayer::draw()
 
 			ImGui::Begin( "CC", nullptr, window_flags);
 
-			gain = std::clamp( gain, -1000000.f, 1000000.f);
-			ImGui::DragFloat("Gain", &gain, std::max(0.00001, std::abs(gain)*0.02));
+			plane.gain_values = std::clamp( plane.gain_values, -1000000.f, 1000000.f);
+			ImGui::DragFloat("Gain", &(plane.gain_values), std::max(0.00001, std::abs(plane.gain_values)*0.02));
 
-			offset_value = std::clamp( offset_value, -1000000.f, 1000000.f);
-			ImGui::DragFloat("Offset", &offset_value, std::max(0.00001, std::abs(offset_value)*0.02));
+			plane.offset_values = std::clamp( plane.offset_values, -1000000.f, 1000000.f);
+			ImGui::DragFloat("Offset", &(plane.offset_values), std::max(0.00001, std::abs(plane.offset_values)*0.02));
 
 			ImGui::PopStyleColor(5);
 			ImGui::End();
@@ -688,8 +688,8 @@ void NoPlayer::draw()
 	glUniform2f(glGetUniformLocation(shader, "scale"),  scale * factor * compensate * plane.image_width/(float)display_w,
 														scale * factor * compensate * plane.image_height/(float)display_h);
 
-	glUniform1f(glGetUniformLocation(shader, "gain"), gain);
-	glUniform1f(glGetUniformLocation(shader, "offset_value"), offset_value);
+	glUniform1f(glGetUniformLocation(shader, "gain_values"), plane.gain_values);
+	glUniform1f(glGetUniformLocation(shader, "offset_values"), plane.offset_values);
 	glUniform1i(glGetUniformLocation(shader, "soloing"), channel_soloing);
 
 	glDisable(GL_DEPTH_TEST); // prevents framebuffer rectangle from being discarded
@@ -938,6 +938,8 @@ void NoPlayer::ImagePlane::generateGlTexture()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+	int data_format[] = {0, GL_RED, GL_RG, GL_RGB, GL_RGBA};
+
 	glTexImage2D(GL_TEXTURE_2D, 0, internal_format[len],
 					image_width, image_height, 0,
 					data_format[len], PRECISION_GL,
@@ -1017,8 +1019,8 @@ void NoPlayer::configureOCIO()
 		out vec4 FragColor;
 		in vec2 texCoords;
 		uniform sampler2D textureSampler;
-		uniform float gain;
-		uniform float offset_value;
+		uniform float gain_values;
+		uniform float offset_values;
 		uniform int soloing;
 	)glsl" +
 	std::string(shaderDesc->getShaderText()) +
@@ -1030,8 +1032,8 @@ void NoPlayer::configureOCIO()
 				if (isnan(fragment[i]))
 					fragment[i]=0.0;
 			}
-			fragment *= gain;
-			fragment += vec4(offset_value);
+			fragment *= gain_values;
+			fragment += vec4(offset_values);
 			FragColor = OCIODisplay(fragment);
 			if (soloing!=0){
 				switch (soloing) {
