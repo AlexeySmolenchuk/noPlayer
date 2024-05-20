@@ -20,13 +20,13 @@ namespace OCIO = OCIO_NAMESPACE;
 	#define precision float
 	#define PRECISION FLOAT
 	#define PRECISION_GL GL_FLOAT
-	int internal_format[] = {0, GL_R32F, GL_RG32F, GL_RGB32F, GL_RGBA32F};
+	int internalFormats[] = {0, GL_R32F, GL_RG32F, GL_RGB32F, GL_RGBA32F};
 #else()
 	#include <half.h>
 	#define precision half
 	#define PRECISION HALF
 	#define PRECISION_GL GL_HALF_FLOAT
-	int internal_format[] = {0, GL_R16F, GL_RG16F, GL_RGB16F, GL_RGBA16F};
+	int internalFormats[] = {0, GL_R16F, GL_RG16F, GL_RGB16F, GL_RGBA16F};
 #endif()
 
 
@@ -38,7 +38,7 @@ class NoPlayer
 		void load();
 		void generateGlTexture();
 
-		std::string image_file;
+		std::string imageFileName;
 		unsigned int subimage;
 		unsigned int mip;
 		std::string name;		// name of sub-image from metadata
@@ -47,16 +47,16 @@ class NoPlayer
 		std::string format;		// string representation of data type
 
 		// Data Window
-		unsigned int image_width;
-		unsigned int image_height;
-		int image_offset_x;
-		int image_offset_y;
+		unsigned int imageWidth;
+		unsigned int imageHeight;
+		int imageOffsetX;
+		int imageOffsetY;
 
 		// Display Window
-		unsigned int window_width;
-		unsigned int window_height;
-		int window_offset_x;
-		int window_offset_y;
+		unsigned int windowWidth;
+		unsigned int windowHeight;
+		int windowOffsetX;
+		int windowOffsetY;
 
 		bool windowEqualData; // is Data Window match Display Window
 
@@ -66,8 +66,8 @@ class NoPlayer
 		GLuint glTexture;	// fill deferred
 		int ready = 0;
 
-		float gain_values = 1.0;
-		float offset_values = 0.0;
+		float gainValues = 1.0;
+		float offsetValues = 0.0;
 
 		~ImagePlane() { delete[] pixels;}
 	};
@@ -76,23 +76,23 @@ public:
 	NoPlayer();
 	~NoPlayer();
 
-	void init(const char* filename);
+	void init(const char* fileName);
 	void run();
 	void draw();
-	void setChannelSoloing(int idx) {channel_soloing = idx;}
+	void setChannelSoloing(int idx) {channelSoloing = idx;}
 	void clear() { imagePlanes.clear();}
 
 private:
 	void scanImageFile();
 	void configureOCIO();
 	void createPlane();
-	void addShader(GLuint program, const char* shader_code, GLenum type);
+	void addShader(GLuint program, const char* shaderCode, GLenum type);
 	void createShaders();
 
 private:
 	GLFWwindow *mainWindow;
 
-	std::string image_file;
+	std::string imageFileName;
 	unsigned int subimages;
 	unsigned int mips;
 
@@ -106,10 +106,10 @@ private:
 	GLuint frameShader;
 
 	float scale;
-	float offset_x;
-	float offset_y;
+	float offsetX;
+	float offsetY;
 
-	std::string vertex_shader_code = R"glsl(
+	std::string vertexShaderCode = R"glsl(
 		#version 330 core
 		layout (location = 0) in vec2 position;
 		uniform vec2 scale;
@@ -121,7 +121,7 @@ private:
 		}
 	)glsl";
 
-	std::string fragment_shader_code = R"glsl(
+	std::string fragmentShaderCode = R"glsl(
 		#version 330 core
 		out vec4 FragColor;
 		in vec2 texCoords;
@@ -133,7 +133,7 @@ private:
 	)glsl";
 
 	// outline frame for Display Window
-	std::string frame_fragment_shader_code = R"glsl(
+	std::string frameFragmentShaderCode = R"glsl(
 		#version 330 core
 		out vec4 FragColor;
 		void main() {
@@ -141,14 +141,14 @@ private:
 		}
 	)glsl";
 
-	int channel_soloing = 0;
+	int channelSoloing = 0;
 	bool inspect = false;
 
-	bool fullscreen = false;
+	bool fullScreen = false;
 };
 
 
-void drop_callback(GLFWwindow* window, int count, const char** paths)
+void dropCallback(GLFWwindow* window, int count, const char** paths)
 {
     // for (int i = 0;  i < count;  i++)
     //     std::cout << paths[i] << std::endl;
@@ -158,7 +158,7 @@ void drop_callback(GLFWwindow* window, int count, const char** paths)
 }
 
 
-void framebuffer_size_callback(GLFWwindow* window, int width, int height)
+void framebufferSizeCallback(GLFWwindow* window, int width, int height)
 {
 	// make sure the viewport matches the new window dimensions; note that width and
 	// height will be significantly larger than specified on retina displays.
@@ -168,7 +168,7 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 }
 
 
-GLFWmonitor* get_current_monitor(GLFWwindow *window)
+GLFWmonitor* getCurrentMonitor(GLFWwindow *window)
 {
 	int nmonitors, i;
 	int wx, wy, ww, wh;
@@ -207,33 +207,33 @@ GLFWmonitor* get_current_monitor(GLFWwindow *window)
 }
 
 
-void key_callback(GLFWwindow* mainWindow, int key, int scancode, int action, int mods)
+void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int mods)
 {
 	// FullScreen Mode
 	if (key == GLFW_KEY_F11 && action == GLFW_PRESS)
 	{
 		if ( glfwGetKey( mainWindow, GLFW_KEY_F11 ) == GLFW_PRESS )
 		{
-			static bool fullscreen = false;
+			static bool fullScreen = false;
 			static int x,y,w,h;
-			if (fullscreen)
+			if (fullScreen)
 			{
 				glfwSetWindowPos(mainWindow, x, y);
 				glfwSetWindowSize(mainWindow, w, h);
-				fullscreen = false;
+				fullScreen = false;
 			}
 			else
 			{
 				glfwGetWindowPos(mainWindow, &x, &y);
 				glfwGetWindowSize(mainWindow, &w, &h);
-				GLFWmonitor *monitor = get_current_monitor(mainWindow);
+				GLFWmonitor *monitor = getCurrentMonitor(mainWindow);
 				int _x, _y ,_w ,_h;
 				glfwGetMonitorWorkarea(monitor, &_x, &_y, &_w, &_h);
 				glfwSetWindowPos(mainWindow, _x, _y);
 
 				const GLFWvidmode* mode = glfwGetVideoMode(monitor);
 				glfwSetWindowSize(mainWindow, mode->width, mode->height);
-				fullscreen = true;
+				fullScreen = true;
 			}
 			glfwSwapBuffers(mainWindow);
 		}
@@ -285,9 +285,9 @@ NoPlayer::NoPlayer()
 
 	// Helper pointer to run callbacks
 	glfwSetWindowUserPointer(mainWindow, this);
-	glfwSetFramebufferSizeCallback(mainWindow, framebuffer_size_callback);
-	glfwSetKeyCallback(mainWindow, key_callback);
-	glfwSetDropCallback(mainWindow, drop_callback);
+	glfwSetFramebufferSizeCallback(mainWindow, framebufferSizeCallback);
+	glfwSetKeyCallback(mainWindow, keyCallback);
+	glfwSetDropCallback(mainWindow, dropCallback);
 
 	int bufferWidth, bufferHeight;
 	glfwGetFramebufferSize(mainWindow, &bufferWidth, &bufferHeight);
@@ -324,16 +324,16 @@ NoPlayer::NoPlayer()
 
 
 void
-NoPlayer::init(const char* filename)
+NoPlayer::init(const char* fileName)
 {
-	image_file = filename;
+	imageFileName = fileName;
 	scanImageFile();
 
 	scale = 1.f;
-	// With this little offset we align image and screen pixels for even and odd combinations
-	offset_x = 0.25f; // Offset of viewed image
-	offset_y = 0.25f; // Offset of viewed image
-	channel_soloing = 0;
+	// With this little offset we can align image and screen pixels for even and odd resolutions
+	offsetX = 0.25f; // Offset of viewed image
+	offsetY = 0.25f; // Offset of viewed image
+	channelSoloing = 0;
 	activePlaneIdx = 0;
 
 	// Preload
@@ -396,21 +396,21 @@ void NoPlayer::draw()
 	glClearColor(0.08f, 0.08f, 0.08f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 
-	int display_w, display_h;
-	glfwGetFramebufferSize(mainWindow, &display_w, &display_h);
+	int displayW, displayH;
+	glfwGetFramebufferSize(mainWindow, &displayW, &displayH);
 
 	ImGuiIO& io = ImGui::GetIO();
 	ImGui::NewFrame();
 
-	if (imagePlanes.size()==0)
+	if (imagePlanes.size() == 0)
 	{
 		{
 			ImGui::SetNextWindowPos(ImVec2(10, 10));
-			ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration
+			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 										| ImGuiWindowFlags_AlwaysAutoResize
 										| ImGuiWindowFlags_NoBackground;
 										;
-			ImGui::Begin( "Info", nullptr, window_flags);
+			ImGui::Begin( "Info", nullptr, windowFlags);
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5, 0.5, 0.5, 1));
 
 			ImGui::Text((const char *)glGetString(GL_VENDOR));
@@ -421,10 +421,10 @@ void NoPlayer::draw()
 
 		{
 			const char* message = "Drop image";
-			ImGui::SetNextWindowPos( (ImVec2(display_w, display_h) - ImGui::CalcTextSize(message))/2);
-			ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration
+			ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2);
+			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 										| ImGuiWindowFlags_NoBackground;
-			ImGui::Begin( "Hello", nullptr, window_flags);
+			ImGui::Begin( "Hello", nullptr, windowFlags);
 			ImGui::Text(message);
 			ImGui::End();
 		}
@@ -439,13 +439,13 @@ void NoPlayer::draw()
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_RightBracket)))
 	{
 		activePlaneIdx = (activePlaneIdx+1)%imagePlanes.size();
-		channel_soloing = 0;
+		channelSoloing = 0;
 	}
 
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_LeftBracket)))
 	{
 		activePlaneIdx = (imagePlanes.size()+activePlaneIdx-1)%imagePlanes.size();
-		channel_soloing = 0;
+		channelSoloing = 0;
 	}
 
 
@@ -453,18 +453,18 @@ void NoPlayer::draw()
 	float compensate = powf(2.0, plane.mip);
 
 	static int lag = 0;
-	static float target_scale = scale;
-	static float target_offset_x = offset_x;
-	static float target_offset_y = offset_y;
+	static float targetScale = scale;
+	static float targetOffsetX = offsetX;
+	static float targetOffsetY = offsetY;
 
 	// Zoom by scrolling
 	if (!io.WantCaptureMouse && io.MouseWheel!=0.0)
 	{
-		ImVec2 scalePivot = ImGui::GetMousePos() - ImVec2(display_w, display_h)/2 - ImVec2(offset_x, offset_y);
+		ImVec2 scalePivot = ImGui::GetMousePos() - ImVec2(displayW, displayH)/2 - ImVec2(offsetX, offsetY);
 		float factor = powf(2, io.MouseWheel/3.0f);
 		ImVec2 temp = scalePivot*(factor-1);
-		offset_x = offset_x - temp.x;
-		offset_y = offset_y - temp.y;
+		offsetX = offsetX - temp.x;
+		offsetY = offsetY - temp.y;
 
 		scale *= powf(2, io.MouseWheel/3.f);
 	}
@@ -472,33 +472,33 @@ void NoPlayer::draw()
 	//Zoom in
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_KeypadAdd)))
 	{
-		target_offset_x = offset_x * 2;
-		target_offset_y = offset_y * 2;
-		target_scale = scale * 2;
+		targetOffsetX = offsetX * 2;
+		targetOffsetY = offsetY * 2;
+		targetScale = scale * 2;
 		lag = 4;
 	}
 
 	// Zoom out
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_KeypadSubtract)))
 	{
-		target_offset_x = offset_x * 0.5;
-		target_offset_y = offset_y * 0.5;
-		target_scale = scale * 0.5;
+		targetOffsetX = offsetX * 0.5;
+		targetOffsetY = offsetY * 0.5;
+		targetScale = scale * 0.5;
 		lag = 4;
 	}
 
 	if (lag)
 	{
 		float f = 1.0/lag;
-		scale = scale * (1.0-f) + target_scale * f;
-		offset_x = offset_x * (1.0-f) + target_offset_x * f;
-		offset_y = offset_y * (1.0-f) + target_offset_y * f;
+		scale = scale * (1.0-f) + targetScale * f;
+		offsetX = offsetX * (1.0-f) + targetOffsetX * f;
+		offsetY = offsetY * (1.0-f) + targetOffsetY * f;
 		lag--;
 	}
 
 	// Scale with RMB
 	// While adjusting zoom values are updated in "shift" and "factor"
-	// When finished (RMB released) these values are baked into scale and offset_x offset_y
+	// When finished (RMB released) these values are baked into scale and offsetX offsetY
 	static float factor = 1.0;
 	static ImVec2 shift(0, 0);
 	if (io.MouseDown[1])
@@ -508,14 +508,14 @@ void NoPlayer::draw()
 		float drag = (delta.x - delta.y) * 0.01;
 		factor = powf( 2, drag / 3.0f);
 
-		ImVec2 scalePivot = io.MouseClickedPos[1] - ImVec2(display_w, display_h)/2 - ImVec2(offset_x, offset_y);
+		ImVec2 scalePivot = io.MouseClickedPos[1] - ImVec2(displayW, displayH)/2 - ImVec2(offsetX, offsetY);
 		shift = scalePivot * (factor - 1);
 	}
 	else if (io.MouseReleased[1])
 	{
 		scale *= factor;
-		offset_x -= shift.x;
-		offset_y -= shift.y;
+		offsetX -= shift.x;
+		offsetY -= shift.y;
 
 		shift = ImVec2(0, 0);
 		factor = 1.0;
@@ -524,18 +524,18 @@ void NoPlayer::draw()
 	// Pan
 	if (io.MouseDown[2])
 	{
-		offset_x += ImGui::GetIO().MouseDelta.x;
-		offset_y += ImGui::GetIO().MouseDelta.y;
+		offsetX += ImGui::GetIO().MouseDelta.x;
+		offsetY += ImGui::GetIO().MouseDelta.y;
 	}
 
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_F)))
 	{
 		// with this little offset we align image and screen pixels for even and odd resolutions
-		offset_x = 0.25;
-		offset_y = 0.25;
+		offsetX = 0.25;
+		offsetY = 0.25;
 		if (scale == 1.0/compensate)
 		{
-			scale = std::min(float(display_h)/float(plane.window_height), float(display_w)/float(plane.window_width))/compensate;
+			scale = std::min(float(displayH)/float(plane.windowHeight), float(displayW)/float(plane.windowWidth))/compensate;
 		}
 		else
 		{
@@ -549,15 +549,15 @@ void NoPlayer::draw()
 
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_0)))
 	{
-		plane.gain_values = 1.0;
-		plane.offset_values = 0.0;
+		plane.gainValues = 1.0;
+		plane.offsetValues = 0.0;
 	}
 
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Equal)))
-		plane.gain_values *= 2.0;
+		plane.gainValues *= 2.0;
 
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Minus)))
-		plane.gain_values *= 0.5;
+		plane.gainValues *= 0.5;
 
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_I)))
 		inspect = !inspect;
@@ -566,14 +566,14 @@ void NoPlayer::draw()
 	if (ui)
 	{
 		ImGui::SetNextWindowPos(ImVec2(10, 10));
-		ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration
+		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 									| ImGuiWindowFlags_AlwaysAutoResize
 									| ImGuiWindowFlags_NoBackground;
 									;
-		ImGui::Begin( "Info", nullptr, window_flags);
+		ImGui::Begin( "Info", nullptr, windowFlags);
 		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5, 0.5, 0.5, 1));
 		// ImGui::Text("%.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-		ImGui::Text(image_file.c_str());
+		ImGui::Text(imageFileName.c_str());
 		if (subimages>1)
 		{
 			ImGui::SameLine();
@@ -582,21 +582,21 @@ void NoPlayer::draw()
 
 		if (plane.windowEqualData)
 		{
-			ImGui::Text("%dx%d", plane.image_width, plane.image_height);
+			ImGui::Text("%dx%d", plane.imageWidth, plane.imageHeight);
 		}
 		else
 		{
-			ImGui::Text("Display: %dx%d", plane.window_width, plane.window_height);
-			if(plane.window_offset_x!=0 || plane.window_offset_y!=0)
+			ImGui::Text("Display: %dx%d", plane.windowWidth, plane.windowHeight);
+			if(plane.windowOffsetX!=0 || plane.windowOffsetY!=0)
 			{
 				ImGui::SameLine();
-				ImGui::Text("(%d,%d)", plane.window_offset_x, plane.window_offset_y);
+				ImGui::Text("(%d,%d)", plane.windowOffsetX, plane.windowOffsetY);
 			}
-			ImGui::Text("Data:	%dx%d", plane.image_width, plane.image_height);
-			if(plane.image_offset_x!=0 || plane.image_offset_y!=0)
+			ImGui::Text("Data:	%dx%d", plane.imageWidth, plane.imageHeight);
+			if(plane.imageOffsetX!=0 || plane.imageOffsetY!=0)
 			{
 				ImGui::SameLine();
-				ImGui::Text("(%d,%d)", plane.image_offset_x, plane.image_offset_y);
+				ImGui::Text("(%d,%d)", plane.imageOffsetX, plane.imageOffsetY);
 			}
 		}
 
@@ -616,15 +616,15 @@ void NoPlayer::draw()
 		ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(1.0, 1.0, 1.0, 0.0));
 
 		ImGui::SetNextWindowPos(ImVec2(10, 100));
-		ImGui::SetNextWindowSizeConstraints(ImVec2(-1, 0), ImVec2(-1, display_h - 120));
+		ImGui::SetNextWindowSizeConstraints(ImVec2(-1, 0), ImVec2(-1, displayH - 120));
 
-		window_flags = ImGuiWindowFlags_None
+		windowFlags = ImGuiWindowFlags_None
 					| ImGuiWindowFlags_NoDecoration
 					| ImGuiWindowFlags_NoNav
 					| ImGuiWindowFlags_AlwaysAutoResize
 					| ImGuiWindowFlags_NoBackground;
 
-		ImGui::Begin( "AOVs", nullptr, window_flags);
+		ImGui::Begin( "AOVs", nullptr, windowFlags);
 		for (int n = 0; n < imagePlanes.size(); n++)
 		{
 			if(activePlaneIdx == n)
@@ -636,7 +636,7 @@ void NoPlayer::draw()
 			if (ImGui::Selectable(imagePlanes[n].name.c_str(), activePlaneIdx == n))
 			{
 				activePlaneIdx = n;
-				channel_soloing = 0;
+				channelSoloing = 0;
 			}
 			ImGui::PopID();
 
@@ -654,7 +654,7 @@ void NoPlayer::draw()
 
 			if(activePlaneIdx == n)
 			{
-				if (channel_soloing==0)
+				if (channelSoloing==0)
 				{
 					ImGui::Text(plane.channels.c_str());
 				}
@@ -663,7 +663,7 @@ void NoPlayer::draw()
 					for (int i = 0; i < plane.len; i++)
 					{
 						if (i) ImGui::SameLine(0, 0);
-						ImGui::TextColored( ((i+1)==channel_soloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1), plane.channels.substr(i, 1).c_str());
+						ImGui::TextColored( ((i+1)==channelSoloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1), plane.channels.substr(i, 1).c_str());
 					}
 				}
 				ImGui::SameLine();
@@ -685,26 +685,26 @@ void NoPlayer::draw()
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5, 0.5, 0.5, 1.0));
 			ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, ImVec4(0.5, 0.5, 0.5, 0.1));
 
-			ImGuiWindowFlags window_flags = ImGuiWindowFlags_None
+			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_None
 										| ImGuiWindowFlags_NoDecoration
 										| ImGuiWindowFlags_NoBackground
 										;
 
-			ImGui::SetNextWindowPos(ImVec2(display_w/2-120, display_h - 35));
-			ImGui::SetNextWindowSize(ImVec2(160, 0));
+			ImGui::SetNextWindowPos(ImVec2(displayW/2-150, displayH - 35));
+			ImGui::SetNextWindowSize(ImVec2(150, 0));
 
-			ImGui::Begin( "Gain", nullptr, window_flags);
-			plane.gain_values = std::clamp( plane.gain_values, -1000000.f, 1000000.f);
-			ImGui::DragFloat("Gain", &(plane.gain_values), std::max(0.00001, std::abs(plane.gain_values)*0.02));
+			ImGui::Begin( "Gain", nullptr, windowFlags);
+			plane.gainValues = std::clamp( plane.gainValues, -1000000.f, 1000000.f);
+			ImGui::DragFloat("Gain", &(plane.gainValues), std::max(0.00001, std::abs(plane.gainValues)*0.01));
 			ImGui::End();
 
 
-			ImGui::SetNextWindowPos(ImVec2(display_w/2+50, display_h - 35));
-			ImGui::SetNextWindowSize(ImVec2(160, 0));
+			ImGui::SetNextWindowPos(ImVec2(displayW/2, displayH - 35));
+			ImGui::SetNextWindowSize(ImVec2(150, 0));
 
-			ImGui::Begin( "Offset", nullptr, window_flags);
-			plane.offset_values = std::clamp( plane.offset_values, -1000000.f, 1000000.f);
-			ImGui::DragFloat("Offset", &(plane.offset_values), std::max(0.00001, std::abs(plane.offset_values)*0.02));
+			ImGui::Begin( "Offset", nullptr, windowFlags);
+			plane.offsetValues = std::clamp( plane.offsetValues, -1000000.f, 1000000.f);
+			ImGui::DragFloat("Offset", &(plane.offsetValues), std::max(0.00001, std::abs(plane.offsetValues)*0.01));
 			ImGui::End();
 
 			ImGui::PopStyleColor(5);
@@ -714,43 +714,43 @@ void NoPlayer::draw()
 	if(plane.ready != 3)
 	{
 		const char* message = "Loading...";
-		ImGui::SetNextWindowPos( (ImVec2(display_w, display_h) - ImGui::CalcTextSize(message))/2);
-		ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration
+		ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2);
+		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 									| ImGuiWindowFlags_NoBackground;
-		ImGui::Begin( "Loading", nullptr, window_flags);
+		ImGui::Begin( "Loading", nullptr, windowFlags);
 		ImGui::Text(message);
 		ImGui::End();
 	}
 
 	if(inspect)
 	{
-		float center_x = plane.image_offset_x + plane.image_width * 0.5
-						- plane.window_offset_x - plane.window_width * 0.5;
-		float center_y = plane.image_offset_y + plane.image_height * 0.5
-						- plane.window_offset_y - plane.window_height * 0.5;
+		float centerX = plane.imageOffsetX + plane.imageWidth * 0.5
+						- plane.windowOffsetX - plane.windowWidth * 0.5;
+		float centerY = plane.imageOffsetY + plane.imageHeight * 0.5
+						- plane.windowOffsetY - plane.windowHeight * 0.5;
 
 		ImVec2 mousePos = ImGui::GetMousePos();
-		ImVec2 coords = mousePos - ImVec2(display_w, display_h)/2 - ImVec2(offset_x, offset_y) + shift;
+		ImVec2 coords = mousePos - ImVec2(displayW, displayH)/2 - ImVec2(offsetX, offsetY) + shift;
 		coords /= scale * compensate * factor;
-		coords += ImVec2(plane.image_width, plane.image_height)*0.5 - ImVec2(center_x, center_y);
+		coords += ImVec2(plane.imageWidth, plane.imageHeight)*0.5 - ImVec2(centerX, centerY);
 
-		if(coords.x >= 0 && coords.x < plane.image_width && coords.y >= 0 && coords.y < plane.image_height)
+		if(coords.x >= 0 && coords.x < plane.imageWidth && coords.y >= 0 && coords.y < plane.imageHeight)
 		{
 			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.4f));
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
-			ImGui::SetNextWindowPos(mousePos + ImVec2((mousePos.x + 128) > display_w ? -100.f : 16.f,
-													  (mousePos.y + 128) > display_h ? -96.f : 24.f));
-			ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration
+			ImGui::SetNextWindowPos(mousePos + ImVec2((mousePos.x + 128) > displayW ? -100.f : 16.f,
+													  (mousePos.y + 128) > displayH ? -96.f : 24.f));
+			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 										| ImGuiWindowFlags_AlwaysAutoResize;
 
-			ImGui::Begin( "Inspect", nullptr, window_flags);
+			ImGui::Begin( "Inspect", nullptr, windowFlags);
 
-			int idx = (int(coords.x) + int(coords.y)*plane.image_width)*plane.len;
+			int idx = (int(coords.x) + int(coords.y)*plane.imageWidth)*plane.len;
 
 			if(!plane.windowEqualData)
-				ImGui::Text("(%d, %d)", (int)(coords.x + plane.image_offset_x - plane.window_offset_x),
-										(int)(coords.y + plane.image_offset_y - plane.window_offset_y));
+				ImGui::Text("(%d, %d)", (int)(coords.x + plane.imageOffsetX - plane.windowOffsetX),
+										(int)(coords.y + plane.imageOffsetY - plane.windowOffsetY));
 			ImGui::Text("(%d, %d)", (int)(coords.x), (int)(coords.y));
 
 			if (plane.ready>1)
@@ -765,45 +765,49 @@ void NoPlayer::draw()
 	ImGui::Render();
 
 	// Draw on Main Window Background
-	glViewport(0, 0, display_w, display_h);
-
+	glViewport(0, 0, displayW, displayH);
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
-	glUseProgram(shader);
 
-	float center_x =  plane.image_offset_x + plane.image_width * 0.5f
-					- plane.window_offset_x - plane.window_width * 0.5f;
-	float center_y =  plane.image_offset_y + plane.image_height * 0.5f
-					- plane.window_offset_y - plane.window_height * 0.5f;
+	if(channelSoloing <= plane.len)
+	{
+		glUseProgram(shader);
 
-	glUniform2f(glGetUniformLocation(shader, "offset"),  (offset_x - shift.x + center_x * scale * factor * compensate)/(float)display_w,
-														-(offset_y - shift.y + center_y * scale * factor * compensate)/(float)display_h);
-	glUniform2f(glGetUniformLocation(shader, "scale"),  scale * factor * compensate * plane.image_width/(float)display_w,
-														scale * factor * compensate * plane.image_height/(float)display_h);
+		float centerX =  plane.imageOffsetX + plane.imageWidth * 0.5f
+						- plane.windowOffsetX - plane.windowWidth * 0.5f;
+		float centerY =  plane.imageOffsetY + plane.imageHeight * 0.5f
+						- plane.windowOffsetY - plane.windowHeight * 0.5f;
 
-	glUniform1f(glGetUniformLocation(shader, "gain_values"), plane.gain_values);
-	glUniform1f(glGetUniformLocation(shader, "offset_values"), plane.offset_values);
-	glUniform1i(glGetUniformLocation(shader, "soloing"), channel_soloing);
-	glUniform1i(glGetUniformLocation(shader, "nchannels"), plane.len);
+		glUniform2f(glGetUniformLocation(shader, "offset"),  (offsetX - shift.x + centerX * scale * factor * compensate)/(float)displayW,
+															-(offsetY - shift.y + centerY * scale * factor * compensate)/(float)displayH);
+		glUniform2f(glGetUniformLocation(shader, "scale"),  scale * factor * compensate * plane.imageWidth/(float)displayW,
+															scale * factor * compensate * plane.imageHeight/(float)displayH);
 
-	static float flash = 0;
-	flash += 1.0f/100;
-	if (flash>1.0)
-		flash = 0;
+		glUniform1f(glGetUniformLocation(shader, "gainValues"), plane.gainValues);
+		glUniform1f(glGetUniformLocation(shader, "offsetValues"), plane.offsetValues);
+		glUniform1i(glGetUniformLocation(shader, "soloing"), channelSoloing);
+		glUniform1i(glGetUniformLocation(shader, "nchannels"), plane.len);
 
-	glUniform1f(glGetUniformLocation(shader, "flash"), flash);
+		static float flash = 0;
+		flash += 1.0f/100;
+		if (flash>1.0)
+			flash = 0;
 
-	glDisable(GL_DEPTH_TEST); // prevents framebuffer rectangle from being discarded
-	glBindTexture(GL_TEXTURE_2D, plane.glTexture);
-	glBindVertexArray(VAO);
-	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+		glUniform1f(glGetUniformLocation(shader, "flash"), flash);
 
-	if (!plane.windowEqualData)
+		glDisable(GL_DEPTH_TEST); // prevents framebuffer rectangle from being discarded
+		glBindTexture(GL_TEXTURE_2D, plane.glTexture);
+		glBindVertexArray(VAO);
+		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+	}
+
+	if (!plane.windowEqualData || channelSoloing > plane.len)
 	{
 		glUseProgram(frameShader);
-		glUniform2f(glGetUniformLocation(frameShader, "offset"), (offset_x - shift.x)/(float)display_w,
-																-(offset_y - shift.y)/(float)display_h);
-		glUniform2f(glGetUniformLocation(frameShader, "scale"), scale * factor * compensate * plane.window_width/(float)display_w,
-																scale * factor * compensate * plane.window_height/(float)display_h);
+		glUniform2f(glGetUniformLocation(frameShader, "offset"), (offsetX - shift.x)/(float)displayW,
+																-(offsetY - shift.y)/(float)displayH);
+		glUniform2f(glGetUniformLocation(frameShader, "scale"), scale * factor * compensate * plane.windowWidth/(float)displayW,
+																scale * factor * compensate * plane.windowHeight/(float)displayH);
+		glBindVertexArray(VAO);
 		glDrawArrays(GL_LINE_LOOP, 0, 4);
 		glBindVertexArray(0);
 		glUseProgram(0);
@@ -821,10 +825,10 @@ void NoPlayer::scanImageFile()
 
 	using namespace OIIO;
 
-	auto inp = ImageInput::open (image_file);
+	auto inp = ImageInput::open (imageFileName);
 	if (! inp)
 	{
-		std::cerr << "Could not open " << image_file
+		std::cerr << "Could not open " << imageFileName
 				<< ", error = " << OIIO::geterror() << "\n";
 		return;
 	}
@@ -871,7 +875,7 @@ void NoPlayer::scanImageFile()
 							{
 								imagePlanes.emplace_back();
 								auto &plane = imagePlanes.back();
-								plane.image_file = image_file;
+								plane.imageFileName = imageFileName;
 								plane.subimage = subimages;
 								plane.mip = mip;
 								plane.name = spec["Name"].get<std::string>();
@@ -881,14 +885,14 @@ void NoPlayer::scanImageFile()
 								plane.begin = i;
 								plane.len = 0;
 
-								plane.image_width = spec.width;
-								plane.image_height = spec.height;
-								plane.image_offset_x = spec.x;
-								plane.image_offset_y = spec.y;
-								plane.window_width = spec.full_width;
-								plane.window_height = spec.full_height;
-								plane.window_offset_x = spec.full_x;
-								plane.window_offset_y = spec.full_y;
+								plane.imageWidth = spec.width;
+								plane.imageHeight = spec.height;
+								plane.imageOffsetX = spec.x;
+								plane.imageOffsetY = spec.y;
+								plane.windowWidth = spec.full_width;
+								plane.windowHeight = spec.full_height;
+								plane.windowOffsetX = spec.full_x;
+								plane.windowOffsetY = spec.full_y;
 
 								created[n] = true;
 							}
@@ -906,7 +910,7 @@ void NoPlayer::scanImageFile()
 					{
 						imagePlanes.emplace_back();
 						auto &plane = imagePlanes.back();
-						plane.image_file = image_file;
+						plane.imageFileName = imageFileName;
 						plane.subimage = subimages;
 						plane.mip = mip;
 						plane.name = spec["Name"].get<std::string>();
@@ -917,14 +921,14 @@ void NoPlayer::scanImageFile()
 						plane.begin = i;
 						plane.len = 1;
 
-						plane.image_width = spec.width;
-						plane.image_height = spec.height;
-						plane.image_offset_x = spec.x;
-						plane.image_offset_y = spec.y;
-						plane.window_width = spec.full_width;
-						plane.window_height = spec.full_height;
-						plane.window_offset_x = spec.full_x;
-						plane.window_offset_y = spec.full_y;
+						plane.imageWidth = spec.width;
+						plane.imageHeight = spec.height;
+						plane.imageOffsetX = spec.x;
+						plane.imageOffsetY = spec.y;
+						plane.windowWidth = spec.full_width;
+						plane.windowHeight = spec.full_height;
+						plane.windowOffsetX = spec.full_x;
+						plane.windowOffsetY = spec.full_y;
 					}
 				}
 				else // Grouping for "dot" separated names
@@ -935,7 +939,7 @@ void NoPlayer::scanImageFile()
 						count++;
 						imagePlanes.emplace_back();
 						auto &plane = imagePlanes.back();
-						plane.image_file = image_file;
+						plane.imageFileName = imageFileName;
 						plane.subimage = subimages;
 						plane.mip = mip;
 						plane.name = spec["Name"].get<std::string>();
@@ -944,19 +948,18 @@ void NoPlayer::scanImageFile()
 						plane.begin = i;
 						plane.len = 0;
 
-						plane.image_width = spec.width;
-						plane.image_height = spec.height;
-						plane.image_offset_x = spec.x;
-						plane.image_offset_y = spec.y;
-						plane.window_width = spec.full_width;
-						plane.window_height = spec.full_height;
-						plane.window_offset_x = spec.full_x;
-						plane.window_offset_y = spec.full_y;
+						plane.imageWidth = spec.width;
+						plane.imageHeight = spec.height;
+						plane.imageOffsetX = spec.x;
+						plane.imageOffsetY = spec.y;
+						plane.windowWidth = spec.full_width;
+						plane.windowHeight = spec.full_height;
+						plane.windowOffsetX = spec.full_x;
+						plane.windowOffsetY = spec.full_y;
 					}
 					imagePlanes.back().len++;
 					imagePlanes.back().channels += name.substr(pos+1);
 				}
-
 
 				imagePlanes.back().windowEqualData = windowEqualData;
 			}
@@ -985,21 +988,20 @@ void NoPlayer::scanImageFile()
 }
 
 
-
 void NoPlayer::ImagePlane::load()
 {
 	using namespace OIIO;
 
-	auto inp = ImageInput::open (image_file);
+	auto inp = ImageInput::open (imageFileName);
 	if (! inp)
 	{
-		std::cerr << "Could not open " << image_file
+		std::cerr << "Could not open " << imageFileName
 				<< ", error = " << OIIO::geterror() << "\n";
 		return;
 	}
 
-	pixels = new precision[ image_width
-							* image_height
+	pixels = new precision[ imageWidth
+							* imageHeight
 							* len];
 
 	if (! inp->read_image( subimage,
@@ -1009,13 +1011,13 @@ void NoPlayer::ImagePlane::load()
 							TypeDesc::PRECISION,
 							&pixels[0]))
 	{
-		std::cerr << "Could not read pixels from " << image_file
+		std::cerr << "Could not read pixels from " << imageFileName
 				<< ", error = " << inp->geterror() << "\n";
 		return;
 	}
 	if (! inp->close ())
 	{
-		std::cerr << "Error closing " << image_file
+		std::cerr << "Error closing " << imageFileName
 				<< ", error = " << inp->geterror() << "\n";
 		return;
 	}
@@ -1041,11 +1043,11 @@ void NoPlayer::ImagePlane::generateGlTexture()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-	int data_format[] = {0, GL_RED, GL_RG, GL_RGB, GL_RGBA};
+	int dataFormats[] = {0, GL_RED, GL_RG, GL_RGB, GL_RGBA};
 
-	glTexImage2D(GL_TEXTURE_2D, 0, internal_format[len],
-					image_width, image_height, 0,
-					data_format[len], PRECISION_GL,
+	glTexImage2D(GL_TEXTURE_2D, 0, internalFormats[len],
+					imageWidth, imageHeight, 0,
+					dataFormats[len], PRECISION_GL,
 					&pixels[0]);
 
 	// std::cout << glGetError() << std::endl;
@@ -1118,12 +1120,12 @@ void NoPlayer::configureOCIO()
 	OCIO::ConstGPUProcessorRcPtr gpu = processor->getOptimizedGPUProcessor(g_optimization);
 	gpu->extractGpuShaderInfo(shaderDesc);
 
-	fragment_shader_code = R"glsl(#version 330 core
+	fragmentShaderCode = R"glsl(#version 330 core
 		out vec4 FragColor;
 		in vec2 texCoords;
 		uniform sampler2D textureSampler;
-		uniform float gain_values;
-		uniform float offset_values;
+		uniform float gainValues;
+		uniform float offsetValues;
 		uniform int soloing;
 		uniform int nchannels;
 		uniform float flash;
@@ -1146,14 +1148,9 @@ void NoPlayer::configureOCIO()
 					return;
 				}
 			}
-			if (soloing > nchannels)
-			{
-				FragColor = vec4(0.0);
-				return;
-			}
 
-			fragment *= gain_values;
-			fragment += vec4(offset_values);
+			fragment *= gainValues;
+			fragment += vec4(offsetValues);
 
 			FragColor = fragment;
 
@@ -1254,8 +1251,8 @@ void NoPlayer::createShaders()
 		exit(1);
 	}
 
-	addShader(shader, vertex_shader_code.c_str(), GL_VERTEX_SHADER);
-	addShader(shader, fragment_shader_code.c_str(), GL_FRAGMENT_SHADER);
+	addShader(shader, vertexShaderCode.c_str(), GL_VERTEX_SHADER);
+	addShader(shader, fragmentShaderCode.c_str(), GL_FRAGMENT_SHADER);
 
 	GLint result = 0;
 	GLchar log[1024] = {0};
@@ -1285,8 +1282,8 @@ void NoPlayer::createShaders()
 		exit(1);
 	}
 
-	addShader(frameShader, vertex_shader_code.c_str(), GL_VERTEX_SHADER);
-	addShader(frameShader, frame_fragment_shader_code.c_str(), GL_FRAGMENT_SHADER);
+	addShader(frameShader, vertexShaderCode.c_str(), GL_VERTEX_SHADER);
+	addShader(frameShader, frameFragmentShaderCode.c_str(), GL_FRAGMENT_SHADER);
 
 	glLinkProgram(frameShader);
 	glGetProgramiv(frameShader, GL_LINK_STATUS, &result);
@@ -1311,12 +1308,12 @@ void NoPlayer::createShaders()
 int main(int argc, char**argv)
 {
 
-	NoPlayer viewer;
+	NoPlayer noPlayerApp;
 
 	if (argc > 1)
-		viewer.init(argv[1]);
+		noPlayerApp.init(argv[1]);
 
-	viewer.run();
+	noPlayerApp.run();
 
 	return 0;
 }
