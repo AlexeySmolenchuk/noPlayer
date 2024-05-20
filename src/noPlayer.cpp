@@ -580,6 +580,12 @@ void NoPlayer::draw()
 			ImGui::Text("[%d Subimages]", subimages);
 		}
 
+		if (mips<=subimages)
+		{
+			ImGui::SameLine();
+			ImGui::Text("[No MIPs]");
+		}
+
 		if (plane.windowEqualData)
 		{
 			ImGui::Text("%dx%d", plane.imageWidth, plane.imageHeight);
