@@ -2,7 +2,6 @@
   "dependencies": [
     "glew",
     "glfw3",
-    "lcms",
     "opencolorio",
     {
       "name": "openimageio",

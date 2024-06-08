@@ -152,6 +152,8 @@ void dropCallback(GLFWwindow* window, int count, const char** paths)
 {
     // for (int i = 0;  i < count;  i++)
     //     std::cout << paths[i] << std::endl;
+
+	// TODO amend async tasks first
 	NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(window));
 	view->clear();
 	view->init(paths[0]);
@@ -700,8 +702,8 @@ void NoPlayer::draw()
 			ImGui::SetNextWindowSize(ImVec2(150, 0));
 
 			ImGui::Begin( "Gain", nullptr, windowFlags);
-			plane.gainValues = std::clamp( plane.gainValues, -1000000.f, 1000000.f);
-			ImGui::DragFloat("Gain", &(plane.gainValues), std::max(0.00001, std::abs(plane.gainValues)*0.01));
+			plane.gainValues = std::clamp( plane.gainValues, -100000.f, 100000.f);
+			ImGui::DragFloat("Gain", &(plane.gainValues), std::max(0.0001, std::abs(plane.gainValues)*0.01));
 			ImGui::End();
 
 
@@ -709,8 +711,8 @@ void NoPlayer::draw()
 			ImGui::SetNextWindowSize(ImVec2(150, 0));
 
 			ImGui::Begin( "Offset", nullptr, windowFlags);
-			plane.offsetValues = std::clamp( plane.offsetValues, -1000000.f, 1000000.f);
-			ImGui::DragFloat("Offset", &(plane.offsetValues), std::max(0.00001, std::abs(plane.offsetValues)*0.01));
+			plane.offsetValues = std::clamp( plane.offsetValues, -100000.f, 100000.f);
+			ImGui::DragFloat("Offset", &(plane.offsetValues), std::max(0.0001, std::abs(plane.offsetValues)*0.01));
 			ImGui::End();
 
 			ImGui::PopStyleColor(5);
@@ -879,8 +881,7 @@ void NoPlayer::scanImageFile()
 						{
 							if (!created[n])
 							{
-								imagePlanes.emplace_back();
-								auto &plane = imagePlanes.back();
+								ImagePlane &plane = imagePlanes.emplace_back();
 								plane.imageFileName = imageFileName;
 								plane.subimage = subimages;
 								plane.mip = mip;
@@ -914,8 +915,7 @@ void NoPlayer::scanImageFile()
 					// can't group automatically
 					if (!groupFound)
 					{
-						imagePlanes.emplace_back();
-						auto &plane = imagePlanes.back();
+						ImagePlane &plane = imagePlanes.emplace_back();
 						plane.imageFileName = imageFileName;
 						plane.subimage = subimages;
 						plane.mip = mip;
@@ -943,8 +943,7 @@ void NoPlayer::scanImageFile()
 					if ((count == 0) || (imagePlanes.back().groupName != channel_group))
 					{
 						count++;
-						imagePlanes.emplace_back();
-						auto &plane = imagePlanes.back();
+						ImagePlane &plane = imagePlanes.emplace_back();
 						plane.imageFileName = imageFileName;
 						plane.subimage = subimages;
 						plane.mip = mip;

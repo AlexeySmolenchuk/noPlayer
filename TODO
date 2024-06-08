@@ -1,19 +1,19 @@
 MIP organize
-walking by mips independent from walking by image planes
+    walking by mips independent from walking by image planes
 
-+ Color Correction
-+ CC settings per image planes
-auto find range
+Color Correction
+    + CC settings per image planes
+    auto find range
 
 OCIO
-OCIO config selector
-OCIO transform selector
-LUT support
+    OCIO config selector
+    OCIO transform selector
+    LUT support
 
 Shader
-+ one channel image display monochromatic
-don't apply color transformation to non RGB image planes
-visualize Nan and Inf
+    + one channel image display monochromatic
+    + don't apply color transformation to non RGB image planes
+    + visualize Nan and Inf
 
 Selective Float/Half precision
 Alpha checking
@@ -21,6 +21,6 @@ Alpha checking
 Display info about storage and compression
 Display metadata
 
-hotkeys map
+visual hotkeys map
 
 thread pool for image plane loading
