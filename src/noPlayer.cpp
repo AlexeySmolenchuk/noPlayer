@@ -33,14 +33,15 @@ namespace OCIO = OCIO_NAMESPACE;
 class NoPlayer
 {
 
-	struct ImagePlane
+	struct ImagePlaneData
 	{
 		void load();
 		void generateGlTexture();
 
 		std::string imageFileName;
-		unsigned int subimage;
-		unsigned int mip;
+		unsigned int subimage;	// index for async loading
+		unsigned int mip;		// index for async loading
+
 		std::string name;		// name of sub-image from metadata
 		std::string groupName;	// group name if exists
 		std::string channels;	// channels names after dot concatenated for corresponding group
@@ -58,18 +59,28 @@ class NoPlayer
 		int windowOffsetX;
 		int windowOffsetY;
 
-		bool windowEqualData; // is Data Window match Display Window
+		bool windowMatchData; // is Data Window match Display Window
 
 		int begin; // index in oiio spec
 		int len;
-		precision *pixels;		// fill deferred
+		precision *pixels;	// fill deferred
 		GLuint glTexture;	// fill deferred
 		int ready = 0;
+
+		~ImagePlaneData() { delete[] pixels;}
+	};
+
+	struct ImagePlane
+	{
+		std::string name;		// name of sub-image from metadata
+		std::string groupName;	// group name if exists
+		std::string channels;	// channels names after dot concatenated for corresponding group
+		int nMIPs;
 
 		float gainValues = 1.0;
 		float offsetValues = 0.0;
 
-		~ImagePlane() { delete[] pixels;}
+		std::vector<ImagePlaneData> MIPs;
 	};
 
 public:
@@ -98,6 +109,7 @@ private:
 
 	std::vector<ImagePlane> imagePlanes;
 	int activePlaneIdx;
+	int activeMIP;
 
 	GLuint VAO;
 	GLuint VBO;
@@ -337,10 +349,11 @@ NoPlayer::init(const char* fileName)
 	offsetY = 0.25f; // Offset of viewed image
 	channelSoloing = 0;
 	activePlaneIdx = 0;
+	activeMIP = 0;
 
 	// Preload
-	std::thread(&NoPlayer::ImagePlane::load, std::ref(imagePlanes[activePlaneIdx])).detach();
-	imagePlanes[0].ready = 1;
+	std::thread(&NoPlayer::ImagePlaneData::load, std::ref(imagePlanes[activePlaneIdx].MIPs[activeMIP])).detach();
+	imagePlanes[activePlaneIdx].MIPs[activeMIP].ready = 1;
 }
 
 
@@ -362,25 +375,27 @@ void NoPlayer::run()
 
 		if (imagePlanes.size())
 		{
+			ImagePlaneData &plane = imagePlanes[activePlaneIdx].MIPs[activeMIP];
 
-			if ( imagePlanes[activePlaneIdx].ready == 0) // not issued yet
+			if ( plane.ready == 0) // not issued yet
 			{
-				std::thread(&NoPlayer::ImagePlane::load, std::ref(imagePlanes[activePlaneIdx])).detach();
-				imagePlanes[activePlaneIdx].ready = 1; // just issued
+				std::thread(&NoPlayer::ImagePlaneData::load, std::ref(plane)).detach();
+				plane.ready = 1; // just issued
 			}
 
 			// we can preload next AOV
+			// TODO preload next MIP
 			int next = (activePlaneIdx + 1)%imagePlanes.size();
-			if ( imagePlanes[next].ready == 0) // not issued yet
+			if ( imagePlanes[next].MIPs[activeMIP].ready == 0) // not issued yet
 			{
-				std::thread(&NoPlayer::ImagePlane::load, std::ref(imagePlanes[next])).detach();
-				imagePlanes[next].ready = 1; // just issued
+				std::thread(&NoPlayer::ImagePlaneData::load, std::ref(imagePlanes[next].MIPs[activeMIP])).detach();
+				imagePlanes[next].MIPs[activeMIP].ready = 1; // just issued
 			}
 
-			if ( imagePlanes[activePlaneIdx].ready == 2) // pixels loaded in RAM
+			if ( plane.ready == 2) // pixels loaded in RAM
 			{
-				imagePlanes[activePlaneIdx].generateGlTexture();
-				imagePlanes[activePlaneIdx].ready = 3; // corresponding gl texture created
+				plane.generateGlTexture();
+				plane.ready = 3; // corresponding gl texture created
 			}
 		}
 
@@ -452,7 +467,16 @@ void NoPlayer::draw()
 
 
 	ImagePlane &plane = imagePlanes[activePlaneIdx];
-	float compensate = powf(2.0, plane.mip);
+
+	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_PageUp)))
+		activeMIP = std::max(0, activeMIP-1);
+
+	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_PageDown)))
+		activeMIP = std::min( plane.nMIPs-1 , activeMIP+1);
+
+
+	ImagePlaneData &planeData = plane.MIPs[activeMIP];
+	float compensateMIP = powf(2.0, planeData.mip);
 
 	static int lag = 0;
 	static float targetScale = scale;
@@ -535,14 +559,10 @@ void NoPlayer::draw()
 		// with this little offset we align image and screen pixels for even and odd resolutions
 		offsetX = 0.25;
 		offsetY = 0.25;
-		if (scale == 1.0/compensate)
-		{
-			scale = std::min(float(displayH)/float(plane.windowHeight), float(displayW)/float(plane.windowWidth))/compensate;
-		}
+		if (scale == 1.0/compensateMIP)
+			scale = std::min(float(displayH)/float(planeData.windowHeight), float(displayW)/float(planeData.windowWidth))/compensateMIP;
 		else
-		{
-			scale = 1.0/compensate;
-		}
+			scale = 1.0/compensateMIP;
 	}
 
 	static bool ui = true;
@@ -582,39 +602,41 @@ void NoPlayer::draw()
 			ImGui::Text("[%d Subimages]", subimages);
 		}
 
+		ImGui::SameLine();
 		if (mips<=subimages)
-		{
-			ImGui::SameLine();
 			ImGui::Text("[No MIPs]");
-		}
+		else
+			ImGui::Text("[%d MIPs]", mips);
 
-		if (plane.windowEqualData)
+
+
+		if (planeData.windowMatchData)
 		{
-			ImGui::Text("%dx%d", plane.imageWidth, plane.imageHeight);
+			ImGui::Text("%dx%d", planeData.imageWidth, planeData.imageHeight);
 		}
 		else
 		{
-			ImGui::Text("Display: %dx%d", plane.windowWidth, plane.windowHeight);
-			if(plane.windowOffsetX!=0 || plane.windowOffsetY!=0)
+			ImGui::Text("Display: %dx%d", planeData.windowWidth, planeData.windowHeight);
+			if(planeData.windowOffsetX!=0 || planeData.windowOffsetY!=0)
 			{
 				ImGui::SameLine();
-				ImGui::Text("(%d,%d)", plane.windowOffsetX, plane.windowOffsetY);
+				ImGui::Text("(%d,%d)", planeData.windowOffsetX, planeData.windowOffsetY);
 			}
-			ImGui::Text("Data:	%dx%d", plane.imageWidth, plane.imageHeight);
-			if(plane.imageOffsetX!=0 || plane.imageOffsetY!=0)
+			ImGui::Text("Data:	%dx%d", planeData.imageWidth, planeData.imageHeight);
+			if(planeData.imageOffsetX!=0 || planeData.imageOffsetY!=0)
 			{
 				ImGui::SameLine();
-				ImGui::Text("(%d,%d)", plane.imageOffsetX, plane.imageOffsetY);
+				ImGui::Text("(%d,%d)", planeData.imageOffsetX, planeData.imageOffsetY);
 			}
 		}
 
 		if (mips>subimages)
 		{
 			ImGui::SameLine();
-			ImGui::Text("[%d/%d MIP]", plane.mip, mips);
+			ImGui::Text("[MIP %d]", planeData.mip);
 		}
 
-		ImGui::Text("Zoom %.01f%%", scale*factor*compensate*100);
+		ImGui::Text("Zoom %.01f%%", scale*factor*compensateMIP*100);
 		ImGui::PopStyleColor();
 		ImGui::End();
 
@@ -635,6 +657,10 @@ void NoPlayer::draw()
 		ImGui::Begin( "AOVs", nullptr, windowFlags);
 		for (int n = 0; n < imagePlanes.size(); n++)
 		{
+
+			ImGui::TextColored( ImVec4(0.5,0.5,0.5,1), imagePlanes[n].MIPs[activeMIP].format.c_str());
+			ImGui::SameLine();
+
 			if(activePlaneIdx == n)
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0, 1.0, 1.0, 1));
 			else
@@ -668,14 +694,12 @@ void NoPlayer::draw()
 				}
 				else
 				{
-					for (int i = 0; i < plane.len; i++)
+					for (int i = 0; i < planeData.len; i++)
 					{
 						if (i) ImGui::SameLine(0, 0);
 						ImGui::TextColored( ((i+1)==channelSoloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1), plane.channels.substr(i, 1).c_str());
 					}
 				}
-				ImGui::SameLine();
-				ImGui::TextColored( ImVec4(0.5,0.5,0.5,1), imagePlanes[n].format.c_str());
 			}
 			else
 			{
@@ -719,7 +743,7 @@ void NoPlayer::draw()
 		}
 	}
 
-	if(plane.ready != 3)
+	if(planeData.ready != 3)
 	{
 		const char* message = "Loading...";
 		ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2);
@@ -732,17 +756,17 @@ void NoPlayer::draw()
 
 	if(inspect)
 	{
-		float centerX = plane.imageOffsetX + plane.imageWidth * 0.5
-						- plane.windowOffsetX - plane.windowWidth * 0.5;
-		float centerY = plane.imageOffsetY + plane.imageHeight * 0.5
-						- plane.windowOffsetY - plane.windowHeight * 0.5;
+		float centerX = planeData.imageOffsetX + planeData.imageWidth * 0.5
+						- planeData.windowOffsetX - planeData.windowWidth * 0.5;
+		float centerY = planeData.imageOffsetY + planeData.imageHeight * 0.5
+						- planeData.windowOffsetY - planeData.windowHeight * 0.5;
 
 		ImVec2 mousePos = ImGui::GetMousePos();
 		ImVec2 coords = mousePos - ImVec2(displayW, displayH)/2 - ImVec2(offsetX, offsetY) + shift;
-		coords /= scale * compensate * factor;
-		coords += ImVec2(plane.imageWidth, plane.imageHeight)*0.5 - ImVec2(centerX, centerY);
+		coords /= scale * compensateMIP * factor;
+		coords += ImVec2(planeData.imageWidth, planeData.imageHeight)*0.5 - ImVec2(centerX, centerY);
 
-		if(coords.x >= 0 && coords.x < plane.imageWidth && coords.y >= 0 && coords.y < plane.imageHeight)
+		if(coords.x >= 0 && coords.x < planeData.imageWidth && coords.y >= 0 && coords.y < planeData.imageHeight)
 		{
 			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.4f));
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -754,16 +778,16 @@ void NoPlayer::draw()
 
 			ImGui::Begin( "Inspect", nullptr, windowFlags);
 
-			int idx = (int(coords.x) + int(coords.y)*plane.imageWidth)*plane.len;
+			int idx = (int(coords.x) + int(coords.y)*planeData.imageWidth)*planeData.len;
 
-			if(!plane.windowEqualData)
-				ImGui::Text("(%d, %d)", (int)(coords.x + plane.imageOffsetX - plane.windowOffsetX),
-										(int)(coords.y + plane.imageOffsetY - plane.windowOffsetY));
+			if(!planeData.windowMatchData)
+				ImGui::Text("(%d, %d)", (int)(coords.x + planeData.imageOffsetX - planeData.windowOffsetX),
+										(int)(coords.y + planeData.imageOffsetY - planeData.windowOffsetY));
 			ImGui::Text("(%d, %d)", (int)(coords.x), (int)(coords.y));
 
-			if (plane.ready>1)
-				for (int i=0; i<plane.len; i++)
-					ImGui::Text("%s %g",  plane.channels.substr(i, 1), float(plane.pixels[idx+i]));
+			if (planeData.ready>1)
+				for (int i=0; i<planeData.len; i++)
+					ImGui::Text("%s %g",  planeData.channels.substr(i, 1), float(planeData.pixels[idx+i]));
 			ImGui::End();
 			ImGui::PopStyleColor();
 			ImGui::PopStyleVar();
@@ -776,24 +800,24 @@ void NoPlayer::draw()
 	glViewport(0, 0, displayW, displayH);
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
-	if(channelSoloing <= plane.len)
+	if(channelSoloing <= planeData.len)
 	{
 		glUseProgram(shader);
 
-		float centerX =  plane.imageOffsetX + plane.imageWidth * 0.5f
-						- plane.windowOffsetX - plane.windowWidth * 0.5f;
-		float centerY =  plane.imageOffsetY + plane.imageHeight * 0.5f
-						- plane.windowOffsetY - plane.windowHeight * 0.5f;
+		float centerX =  planeData.imageOffsetX + planeData.imageWidth * 0.5f
+						- planeData.windowOffsetX - planeData.windowWidth * 0.5f;
+		float centerY =  planeData.imageOffsetY + planeData.imageHeight * 0.5f
+						- planeData.windowOffsetY - planeData.windowHeight * 0.5f;
 
-		glUniform2f(glGetUniformLocation(shader, "offset"),  (offsetX - shift.x + centerX * scale * factor * compensate)/(float)displayW,
-															-(offsetY - shift.y + centerY * scale * factor * compensate)/(float)displayH);
-		glUniform2f(glGetUniformLocation(shader, "scale"),  scale * factor * compensate * plane.imageWidth/(float)displayW,
-															scale * factor * compensate * plane.imageHeight/(float)displayH);
+		glUniform2f(glGetUniformLocation(shader, "offset"),  (offsetX - shift.x + centerX * scale * factor * compensateMIP)/(float)displayW,
+															-(offsetY - shift.y + centerY * scale * factor * compensateMIP)/(float)displayH);
+		glUniform2f(glGetUniformLocation(shader, "scale"),  scale * factor * compensateMIP * planeData.imageWidth/(float)displayW,
+															scale * factor * compensateMIP * planeData.imageHeight/(float)displayH);
 
 		glUniform1f(glGetUniformLocation(shader, "gainValues"), plane.gainValues);
 		glUniform1f(glGetUniformLocation(shader, "offsetValues"), plane.offsetValues);
 		glUniform1i(glGetUniformLocation(shader, "soloing"), channelSoloing);
-		glUniform1i(glGetUniformLocation(shader, "nchannels"), plane.len);
+		glUniform1i(glGetUniformLocation(shader, "nchannels"), planeData.len);
 
 		static float flash = 0;
 		flash += 1.0f/100;
@@ -803,18 +827,18 @@ void NoPlayer::draw()
 		glUniform1f(glGetUniformLocation(shader, "flash"), flash);
 
 		glDisable(GL_DEPTH_TEST); // prevents framebuffer rectangle from being discarded
-		glBindTexture(GL_TEXTURE_2D, plane.glTexture);
+		glBindTexture(GL_TEXTURE_2D, planeData.glTexture);
 		glBindVertexArray(VAO);
 		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 	}
 
-	if (!plane.windowEqualData || channelSoloing > plane.len)
+	if (!planeData.windowMatchData || channelSoloing > planeData.len)
 	{
 		glUseProgram(frameShader);
 		glUniform2f(glGetUniformLocation(frameShader, "offset"), (offsetX - shift.x)/(float)displayW,
 																-(offsetY - shift.y)/(float)displayH);
-		glUniform2f(glGetUniformLocation(frameShader, "scale"), scale * factor * compensate * plane.windowWidth/(float)displayW,
-																scale * factor * compensate * plane.windowHeight/(float)displayH);
+		glUniform2f(glGetUniformLocation(frameShader, "scale"), scale * factor * compensateMIP * planeData.windowWidth/(float)displayW,
+																scale * factor * compensateMIP * planeData.windowHeight/(float)displayH);
 		glBindVertexArray(VAO);
 		glDrawArrays(GL_LINE_LOOP, 0, 4);
 		glBindVertexArray(0);
@@ -842,6 +866,7 @@ void NoPlayer::scanImageFile()
 	}
 
 	std::vector<std::string> predefined = {"RGBA", "XYZ", "UV", "rgba", "xyz", "uv"};
+	std::vector<ImagePlaneData> imagePlanesFlattened; // To Replace
 
 	int mip = 0;
 	while (inp->seek_subimage(subimages, mip))
@@ -859,12 +884,12 @@ void NoPlayer::scanImageFile()
 			// << "tile height:" << spec.tile_height << std::endl
 			// << std::endl;
 
-			bool windowEqualData = (spec.width == spec.full_width &&
+			bool windowMatchData = (spec.width == spec.full_width &&
 									spec.height == spec.full_height &&
 									spec.x == spec.full_x &&
 									spec.y == spec.full_y);
 
-			std::vector<bool> created(predefined.size());
+			std::vector<bool> isCreated(predefined.size());
 
 			for(int i = 0; i < spec.nchannels; i++)
 			{
@@ -875,20 +900,23 @@ void NoPlayer::scanImageFile()
 				if (pos == std::string::npos)
 				{
 					bool groupFound = false;
+
+					// loop through predefined names
 					for (int n = 0; n < predefined.size(); n++)
 					{
+						// Search if current channel e.g. "G" is part of predefined "RGBA"
 						if (predefined[n].find(name) != std::string::npos)
 						{
-							if (!created[n])
+							if (!isCreated[n])
 							{
-								ImagePlane &plane = imagePlanes.emplace_back();
+								ImagePlaneData &plane = imagePlanesFlattened.emplace_back();
 								plane.imageFileName = imageFileName;
 								plane.subimage = subimages;
 								plane.mip = mip;
 								plane.name = spec["Name"].get<std::string>();
 								plane.groupName = "";
 
-								imagePlanes.back().format = spec.channelformat(i).c_str();
+								imagePlanesFlattened.back().format = spec.channelformat(i).c_str();
 								plane.begin = i;
 								plane.len = 0;
 
@@ -901,12 +929,12 @@ void NoPlayer::scanImageFile()
 								plane.windowOffsetX = spec.full_x;
 								plane.windowOffsetY = spec.full_y;
 
-								created[n] = true;
+								isCreated[n] = true;
 							}
 
 							// Fill additional information for already created plane
-							imagePlanes.back().channels += name;
-							imagePlanes.back().len++;
+							imagePlanesFlattened.back().channels += name;
+							imagePlanesFlattened.back().len++;
 							groupFound = true;
 							break;
 						}
@@ -915,7 +943,7 @@ void NoPlayer::scanImageFile()
 					// can't group automatically
 					if (!groupFound)
 					{
-						ImagePlane &plane = imagePlanes.emplace_back();
+						ImagePlaneData &plane = imagePlanesFlattened.emplace_back();
 						plane.imageFileName = imageFileName;
 						plane.subimage = subimages;
 						plane.mip = mip;
@@ -940,10 +968,10 @@ void NoPlayer::scanImageFile()
 				else // Grouping for "dot" separated names
 				{
 					auto channel_group = name.substr(0, pos);
-					if ((count == 0) || (imagePlanes.back().groupName != channel_group))
+					if ((count == 0) || (imagePlanesFlattened.back().groupName != channel_group))
 					{
 						count++;
-						ImagePlane &plane = imagePlanes.emplace_back();
+						ImagePlaneData &plane = imagePlanesFlattened.emplace_back();
 						plane.imageFileName = imageFileName;
 						plane.subimage = subimages;
 						plane.mip = mip;
@@ -962,11 +990,11 @@ void NoPlayer::scanImageFile()
 						plane.windowOffsetX = spec.full_x;
 						plane.windowOffsetY = spec.full_y;
 					}
-					imagePlanes.back().len++;
-					imagePlanes.back().channels += name.substr(pos+1);
+					imagePlanesFlattened.back().len++;
+					imagePlanesFlattened.back().channels += name.substr(pos+1);
 				}
 
-				imagePlanes.back().windowEqualData = windowEqualData;
+				imagePlanesFlattened.back().windowMatchData = windowMatchData;
 			}
 			mip++;
 			mips++;
@@ -975,9 +1003,45 @@ void NoPlayer::scanImageFile()
 		mip = 0;
 	}
 
-	// for (auto plane: imagePlanes)
+	std::unordered_map<std::string, size_t> map;
+
+	for (auto plane: imagePlanesFlattened)
+	{
+		std::string key;
+
+		if (!plane.name.empty())
+			key += plane.name + " ";
+
+		if (!plane.groupName.empty())
+			key += plane.groupName + " ";
+
+		if (!plane.channels.empty())
+			key += plane.channels;
+
+		size_t idx = imagePlanes.size();
+		if (map.find(key) == map.end())
+		{
+			map[key] = idx;
+			ImagePlane p;
+			p.name = plane.name;
+			p.groupName = plane.groupName;
+			p.channels = plane.channels;
+			p.nMIPs = 0;
+			imagePlanes.push_back(p);
+		}
+		else
+			idx = map[key];
+
+		imagePlanes[idx].MIPs.push_back(plane);
+		imagePlanes[idx].nMIPs++;
+	}
+
+
+	// for (auto plane: imagePlanesFlattened)
 	// {
 	// 	std::cout <<
+	// 	plane.subimage << " " <<
+	// 	plane.mip << " " <<
 	// 	plane.name << " " <<
 	// 	plane.groupName << " " <<
 	// 	plane.channels << " " <<
@@ -993,7 +1057,7 @@ void NoPlayer::scanImageFile()
 }
 
 
-void NoPlayer::ImagePlane::load()
+void NoPlayer::ImagePlaneData::load()
 {
 	using namespace OIIO;
 
@@ -1031,7 +1095,7 @@ void NoPlayer::ImagePlane::load()
 }
 
 
-void NoPlayer::ImagePlane::generateGlTexture()
+void NoPlayer::ImagePlaneData::generateGlTexture()
 {
 	glPixelStorei(GL_PACK_ALIGNMENT, 2);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
