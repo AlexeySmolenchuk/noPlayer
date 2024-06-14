@@ -384,12 +384,19 @@ void NoPlayer::run()
 			}
 
 			// we can preload next AOV
-			// TODO preload next MIP
 			int next = (activePlaneIdx + 1)%imagePlanes.size();
 			if ( imagePlanes[next].MIPs[activeMIP].ready == 0) // not issued yet
 			{
 				std::thread(&NoPlayer::ImagePlaneData::load, std::ref(imagePlanes[next].MIPs[activeMIP])).detach();
 				imagePlanes[next].MIPs[activeMIP].ready = 1; // just issued
+			}
+
+			// preload next MIP
+			int nextMIP = (activeMIP + 1) % imagePlanes[activePlaneIdx].MIPs.size();
+			if ( imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == 0) // not issued yet
+			{
+				std::thread(&NoPlayer::ImagePlaneData::load, std::ref(imagePlanes[activePlaneIdx].MIPs[nextMIP])).detach();
+				imagePlanes[activePlaneIdx].MIPs[nextMIP].ready = 1; // just issued
 			}
 
 			if ( plane.ready == 2) // pixels loaded in RAM
@@ -1005,7 +1012,7 @@ void NoPlayer::scanImageFile()
 
 	std::unordered_map<std::string, size_t> map;
 
-	for (auto plane: imagePlanesFlattened)
+	for (ImagePlaneData plane: imagePlanesFlattened)
 	{
 		std::string key;
 
