@@ -1,5 +1,5 @@
 MIP organize
-    walking by mips independent from walking by image planes
+    + walking by mips independent from walking by image planes
 
 Color Correction
     + CC settings per image planes
@@ -9,6 +9,7 @@ OCIO
     OCIO config selector
     OCIO transform selector
     LUT support
+    colormapping for LDR images
 
 Shader
     + one channel image display monochromatic
