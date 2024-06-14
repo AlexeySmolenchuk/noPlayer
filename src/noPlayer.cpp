@@ -445,7 +445,7 @@ void NoPlayer::draw()
 
 		{
 			const char* message = "Drop image";
-			ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2);
+			ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2.f);
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 										| ImGuiWindowFlags_NoBackground;
 			ImGui::Begin( "Hello", nullptr, windowFlags);
@@ -483,7 +483,7 @@ void NoPlayer::draw()
 
 
 	ImagePlaneData &planeData = plane.MIPs[activeMIP];
-	float compensateMIP = powf(2.0, planeData.mip);
+	float compensateMIP = powf(2.0f, planeData.mip);
 
 	static int lag = 0;
 	static float targetScale = scale;
@@ -493,7 +493,7 @@ void NoPlayer::draw()
 	// Zoom by scrolling
 	if (!io.WantCaptureMouse && io.MouseWheel!=0.0)
 	{
-		ImVec2 scalePivot = ImGui::GetMousePos() - ImVec2(displayW, displayH)/2 - ImVec2(offsetX, offsetY);
+		ImVec2 scalePivot = ImGui::GetMousePos() - ImVec2(displayW, displayH)/2.f - ImVec2(offsetX, offsetY);
 		float factor = powf(2, io.MouseWheel/3.0f);
 		ImVec2 temp = scalePivot*(factor-1);
 		offsetX = offsetX - temp.x;
@@ -514,18 +514,18 @@ void NoPlayer::draw()
 	// Zoom out
 	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_KeypadSubtract)))
 	{
-		targetOffsetX = offsetX * 0.5;
-		targetOffsetY = offsetY * 0.5;
-		targetScale = scale * 0.5;
+		targetOffsetX = offsetX * 0.5f;
+		targetOffsetY = offsetY * 0.5f;
+		targetScale = scale * 0.5f;
 		lag = 4;
 	}
 
 	if (lag)
 	{
-		float f = 1.0/lag;
-		scale = scale * (1.0-f) + targetScale * f;
-		offsetX = offsetX * (1.0-f) + targetOffsetX * f;
-		offsetY = offsetY * (1.0-f) + targetOffsetY * f;
+		float f = 1.0f/lag;
+		scale = scale * (1.0f-f) + targetScale * f;
+		offsetX = offsetX * (1.0f-f) + targetOffsetX * f;
+		offsetY = offsetY * (1.0f-f) + targetOffsetY * f;
 		lag--;
 	}
 
@@ -538,10 +538,10 @@ void NoPlayer::draw()
 	{
 		ImVec2 delta = ImGui::GetMousePos() - io.MouseClickedPos[1];
 
-		float drag = (delta.x - delta.y) * 0.01;
-		factor = powf( 2, drag / 3.0f);
+		float drag = (delta.x - delta.y) * 0.01f;
+		factor = powf( 2.f, drag / 3.0f);
 
-		ImVec2 scalePivot = io.MouseClickedPos[1] - ImVec2(displayW, displayH)/2 - ImVec2(offsetX, offsetY);
+		ImVec2 scalePivot = io.MouseClickedPos[1] - ImVec2(displayW, displayH)/2.f - ImVec2(offsetX, offsetY);
 		shift = scalePivot * (factor - 1);
 	}
 	else if (io.MouseReleased[1])
@@ -569,7 +569,7 @@ void NoPlayer::draw()
 		if (scale == 1.0/compensateMIP)
 			scale = std::min(float(displayH)/float(planeData.windowHeight), float(displayW)/float(planeData.windowWidth))/compensateMIP;
 		else
-			scale = 1.0/compensateMIP;
+			scale = 1.0f/compensateMIP;
 	}
 
 	static bool ui = true;
@@ -734,7 +734,7 @@ void NoPlayer::draw()
 
 			ImGui::Begin( "Gain", nullptr, windowFlags);
 			plane.gainValues = std::clamp( plane.gainValues, -100000.f, 100000.f);
-			ImGui::DragFloat("Gain", &(plane.gainValues), std::max(0.0001, std::abs(plane.gainValues)*0.01));
+			ImGui::DragFloat("Gain", &(plane.gainValues), std::fmax(0.0001f, std::fabs(plane.gainValues)*0.01f));
 			ImGui::End();
 
 
@@ -743,7 +743,7 @@ void NoPlayer::draw()
 
 			ImGui::Begin( "Offset", nullptr, windowFlags);
 			plane.offsetValues = std::clamp( plane.offsetValues, -100000.f, 100000.f);
-			ImGui::DragFloat("Offset", &(plane.offsetValues), std::max(0.0001, std::abs(plane.offsetValues)*0.01));
+			ImGui::DragFloat("Offset", &(plane.offsetValues), std::fmax(0.0001f, std::fabs(plane.offsetValues)*0.01f));
 			ImGui::End();
 
 			ImGui::PopStyleColor(5);
@@ -753,7 +753,7 @@ void NoPlayer::draw()
 	if(planeData.ready != 3)
 	{
 		const char* message = "Loading...";
-		ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2);
+		ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2.f);
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 									| ImGuiWindowFlags_NoBackground;
 		ImGui::Begin( "Loading", nullptr, windowFlags);
@@ -763,15 +763,15 @@ void NoPlayer::draw()
 
 	if(inspect)
 	{
-		float centerX = planeData.imageOffsetX + planeData.imageWidth * 0.5
-						- planeData.windowOffsetX - planeData.windowWidth * 0.5;
-		float centerY = planeData.imageOffsetY + planeData.imageHeight * 0.5
-						- planeData.windowOffsetY - planeData.windowHeight * 0.5;
+		float centerX = planeData.imageOffsetX + planeData.imageWidth * 0.5f
+						- planeData.windowOffsetX - planeData.windowWidth * 0.5f;
+		float centerY = planeData.imageOffsetY + planeData.imageHeight * 0.5f
+						- planeData.windowOffsetY - planeData.windowHeight * 0.5f;
 
 		ImVec2 mousePos = ImGui::GetMousePos();
-		ImVec2 coords = mousePos - ImVec2(displayW, displayH)/2 - ImVec2(offsetX, offsetY) + shift;
+		ImVec2 coords = mousePos - ImVec2(displayW, displayH)*0.5f - ImVec2(offsetX, offsetY) + shift;
 		coords /= scale * compensateMIP * factor;
-		coords += ImVec2(planeData.imageWidth, planeData.imageHeight)*0.5 - ImVec2(centerX, centerY);
+		coords += ImVec2(planeData.imageWidth, planeData.imageHeight)*0.5f - ImVec2(centerX, centerY);
 
 		if(coords.x >= 0 && coords.x < planeData.imageWidth && coords.y >= 0 && coords.y < planeData.imageHeight)
 		{
@@ -1298,7 +1298,7 @@ void NoPlayer::addShader(GLuint program, const char* shader_code, GLenum type)
 	code[0] = shader_code;
 
 	GLint code_length[1];
-	code_length[0] = strlen(shader_code);
+	code_length[0] = (GLint)strlen(shader_code);
 
 	glShaderSource(current_shader, 1, code, code_length);
 	glCompileShader(current_shader);
