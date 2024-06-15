@@ -21,13 +21,13 @@ namespace OCIO = OCIO_NAMESPACE;
 	#define PRECISION FLOAT
 	#define PRECISION_GL GL_FLOAT
 	int internalFormats[] = {0, GL_R32F, GL_RG32F, GL_RGB32F, GL_RGBA32F};
-#else()
+#else
 	#include <half.h>
 	#define precision half
 	#define PRECISION HALF
 	#define PRECISION_GL GL_HALF_FLOAT
 	int internalFormats[] = {0, GL_R16F, GL_RG16F, GL_RGB16F, GL_RGBA16F};
-#endif()
+#endif
 
 
 class NoPlayer
@@ -794,7 +794,7 @@ void NoPlayer::draw()
 
 			if (planeData.ready>1)
 				for (int i=0; i<planeData.len; i++)
-					ImGui::Text("%s %g",  planeData.channels.substr(i, 1), float(planeData.pixels[idx+i]));
+					ImGui::Text("%s %g",  planeData.channels.substr(i, 1).c_str(), float(planeData.pixels[idx+i]));
 			ImGui::End();
 			ImGui::PopStyleColor();
 			ImGui::PopStyleVar();
