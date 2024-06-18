@@ -475,10 +475,10 @@ void NoPlayer::draw()
 
 	ImagePlane &plane = imagePlanes[activePlaneIdx];
 
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_PageUp)))
+	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_PageUp)) || ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Keypad9)))
 		activeMIP = std::max(0, activeMIP-1);
 
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_PageDown)))
+	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_PageDown)) || ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Keypad3)))
 		activeMIP = std::min( plane.nMIPs-1 , activeMIP+1);
 
 
