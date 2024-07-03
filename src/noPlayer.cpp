@@ -718,11 +718,11 @@ void NoPlayer::draw()
 		ImGui::End();
 
 		{
-			ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.5, 0.5, 0.5, 0.05));
-			ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.5, 0.5, 0.5, 0.1));
-			ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.5, 0.5, 0.5, 0.15));
-			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5, 0.5, 0.5, 1.0));
-			ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, ImVec4(0.5, 0.5, 0.5, 0.1));
+			ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.5f, 0.5f, 0.5f, 0.05f));
+			ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.5f, 0.5f, 0.5f, 0.1f));
+			ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.5f, 0.5f, 0.5f, 0.15f));
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+			ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, ImVec4(0.5f, 0.5f, 0.5f, 0.1f));
 
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_None
 										| ImGuiWindowFlags_NoDecoration
