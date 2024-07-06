@@ -25,3 +25,16 @@ Display metadata
 visual hotkeys map
 
 thread pool for image plane loading
+
+
+List of shortcuts:
+` 1 2 3 4 (top row) RGB/R/G/B/A
+0 - =     (top row) Exposure Reset/EV-/EV+
+[ ]       Next/Previous AOV
+PgUp PgDn Next/Previous MIP
+F         Fit/100%
+I         Inspect Tool
+F11       Fullscreen
+H         Hide UI
++ -       (numpad) ZoomIn/ZoomOut
+Esc       Exit
