@@ -1,164 +1,4 @@
-#include <iostream>
-#include <string>
-#include <thread>
-
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
-
-#define IMGUI_DEFINE_MATH_OPERATORS
-#include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
-
-#include <OpenImageIO/imageio.h>
-#include <OpenColorIO/OpenColorIO.h>
-namespace OCIO = OCIO_NAMESPACE;
-
-// #define PRECISION_FLOAT
-
-#ifdef PRECISION_FLOAT
-	#define precision float
-	#define PRECISION FLOAT
-	#define PRECISION_GL GL_FLOAT
-	int internalFormats[] = {0, GL_R32F, GL_RG32F, GL_RGB32F, GL_RGBA32F};
-#else
-	#include <half.h>
-	#define precision half
-	#define PRECISION HALF
-	#define PRECISION_GL GL_HALF_FLOAT
-	int internalFormats[] = {0, GL_R16F, GL_RG16F, GL_RGB16F, GL_RGBA16F};
-#endif
-
-
-class NoPlayer
-{
-
-	struct ImagePlaneData
-	{
-		void load();
-		void generateGlTexture();
-
-		std::string imageFileName;
-		unsigned int subimage;	// index for async loading
-		unsigned int mip;		// index for async loading
-
-		std::string name;		// name of sub-image from metadata
-		std::string groupName;	// group name if exists
-		std::string channels;	// channels names after dot concatenated for corresponding group
-		std::string format;		// string representation of data type
-
-		// Data Window
-		unsigned int imageWidth;
-		unsigned int imageHeight;
-		int imageOffsetX;
-		int imageOffsetY;
-
-		// Display Window
-		unsigned int windowWidth;
-		unsigned int windowHeight;
-		int windowOffsetX;
-		int windowOffsetY;
-
-		bool windowMatchData; // is Data Window match Display Window
-
-		int begin; // index in oiio spec
-		int len;
-		precision *pixels;	// fill deferred
-		GLuint glTexture;	// fill deferred
-		int ready = 0;
-
-		~ImagePlaneData() { delete[] pixels;}
-	};
-
-	struct ImagePlane
-	{
-		std::string name;		// name of sub-image from metadata
-		std::string groupName;	// group name if exists
-		std::string channels;	// channels names after dot concatenated for corresponding group
-		int nMIPs;
-
-		float gainValues = 1.0;
-		float offsetValues = 0.0;
-
-		std::vector<ImagePlaneData> MIPs;
-	};
-
-public:
-	NoPlayer();
-	~NoPlayer();
-
-	void init(const char* fileName);
-	void run();
-	void draw();
-	void setChannelSoloing(int idx) {channelSoloing = idx;}
-	void clear() { imagePlanes.clear();}
-
-private:
-	void scanImageFile();
-	void configureOCIO();
-	void createPlane();
-	void addShader(GLuint program, const char* shaderCode, GLenum type);
-	void createShaders();
-
-private:
-	GLFWwindow *mainWindow;
-
-	std::string imageFileName;
-	unsigned int subimages;
-	unsigned int mips;
-
-	std::vector<ImagePlane> imagePlanes;
-	int activePlaneIdx;
-	int activeMIP;
-
-	GLuint VAO;
-	GLuint VBO;
-
-	GLuint shader;
-	GLuint frameShader;
-
-	float scale;
-	float offsetX;
-	float offsetY;
-
-	std::string vertexShaderCode = R"glsl(
-		#version 330 core
-		layout (location = 0) in vec2 position;
-		uniform vec2 scale;
-		uniform vec2 offset;
-		out vec2 texCoords;
-		void main() {
-			gl_Position = vec4((position*2.0 - 1.0)*scale + offset*2, 0.0, 1.0);
-			texCoords = vec2(position.x, 1.0 - position.y);
-		}
-	)glsl";
-
-	std::string fragmentShaderCode = R"glsl(
-		#version 330 core
-		out vec4 FragColor;
-		in vec2 texCoords;
-		uniform sampler2D textureSampler;
-		void main() {
-			vec4 fragment = texture(textureSampler, texCoords.xy);
-			FragColor.rgb = pow(fragment.rgb, vec3(1.0f / 1.8f)) - 0.05;
-		}
-	)glsl";
-
-	// outline frame for Display Window
-	std::string frameFragmentShaderCode = R"glsl(
-		#version 330 core
-		out vec4 FragColor;
-		void main() {
-			FragColor = vec4(0.2);
-		}
-	)glsl";
-
-	int channelSoloing = 0;
-	bool inspect = false;
-
-	bool fullScreen = false;
-};
-
+#include "noPlayer.h"
 
 void dropCallback(GLFWwindow* window, int count, const char** paths)
 {
@@ -341,7 +181,8 @@ void
 NoPlayer::init(const char* fileName)
 {
 	imageFileName = fileName;
-	scanImageFile();
+	if (!scanImageFile())
+		return;
 
 	scale = 1.f;
 	// With this little offset we can align image and screen pixels for even and odd resolutions
@@ -352,7 +193,7 @@ NoPlayer::init(const char* fileName)
 	activeMIP = 0;
 
 	// Preload
-	std::thread(&NoPlayer::ImagePlaneData::load, std::ref(imagePlanes[activePlaneIdx].MIPs[activeMIP])).detach();
+	std::thread(&ImagePlaneData::load, std::ref(imagePlanes[activePlaneIdx].MIPs[activeMIP])).detach();
 	imagePlanes[activePlaneIdx].MIPs[activeMIP].ready = 1;
 }
 
@@ -379,7 +220,7 @@ void NoPlayer::run()
 
 			if ( plane.ready == 0) // not issued yet
 			{
-				std::thread(&NoPlayer::ImagePlaneData::load, std::ref(plane)).detach();
+				std::thread(&ImagePlaneData::load, std::ref(plane)).detach();
 				plane.ready = 1; // just issued
 			}
 
@@ -387,7 +228,7 @@ void NoPlayer::run()
 			int next = (activePlaneIdx + 1)%imagePlanes.size();
 			if ( imagePlanes[next].MIPs[activeMIP].ready == 0) // not issued yet
 			{
-				std::thread(&NoPlayer::ImagePlaneData::load, std::ref(imagePlanes[next].MIPs[activeMIP])).detach();
+				std::thread(&ImagePlaneData::load, std::ref(imagePlanes[next].MIPs[activeMIP])).detach();
 				imagePlanes[next].MIPs[activeMIP].ready = 1; // just issued
 			}
 
@@ -395,7 +236,7 @@ void NoPlayer::run()
 			int nextMIP = (activeMIP + 1) % imagePlanes[activePlaneIdx].MIPs.size();
 			if ( imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == 0) // not issued yet
 			{
-				std::thread(&NoPlayer::ImagePlaneData::load, std::ref(imagePlanes[activePlaneIdx].MIPs[nextMIP])).detach();
+				std::thread(&ImagePlaneData::load, std::ref(imagePlanes[activePlaneIdx].MIPs[nextMIP])).detach();
 				imagePlanes[activePlaneIdx].MIPs[nextMIP].ready = 1; // just issued
 			}
 
@@ -439,17 +280,19 @@ void NoPlayer::draw()
 
 			ImGui::Text((const char *)glGetString(GL_VENDOR));
 			ImGui::Text((const char *)glGetString(GL_RENDERER));
+			ImGui::Text((const char *)glGetString(GL_VERSION));
+			ImGui::Text(message.c_str());
 			ImGui::PopStyleColor();
 			ImGui::End();
 		}
 
 		{
-			const char* message = "Drop image";
-			ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2.f);
+			const char* dropImageMsg = "Drop image";
+			ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(dropImageMsg))/2.f);
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 										| ImGuiWindowFlags_NoBackground;
 			ImGui::Begin( "Hello", nullptr, windowFlags);
-			ImGui::Text(message);
+			ImGui::Text(dropImageMsg);
 			ImGui::End();
 		}
 
@@ -857,7 +700,7 @@ void NoPlayer::draw()
 }
 
 
-void NoPlayer::scanImageFile()
+bool NoPlayer::scanImageFile()
 {
 	subimages = 0;
 	mips = 0;
@@ -867,9 +710,10 @@ void NoPlayer::scanImageFile()
 	auto inp = ImageInput::open (imageFileName);
 	if (! inp)
 	{
+		message = OIIO::geterror();
 		std::cerr << "Could not open " << imageFileName
-				<< ", error = " << OIIO::geterror() << "\n";
-		return;
+				<< ", error = " << message << "\n";
+		return false;
 	}
 
 	std::vector<std::string> predefined = {"RGBA", "XYZ", "UV", "rgba", "xyz", "uv"};
@@ -1061,74 +905,11 @@ void NoPlayer::scanImageFile()
 	// std::cout << "MIPs: " << mips << std::endl;
 
 	// std::cout << spec.serialize(ImageSpec::SerialText) << std::endl;
+
+	return true;
 }
 
 
-void NoPlayer::ImagePlaneData::load()
-{
-	using namespace OIIO;
-
-	auto inp = ImageInput::open (imageFileName);
-	if (! inp)
-	{
-		std::cerr << "Could not open " << imageFileName
-				<< ", error = " << OIIO::geterror() << "\n";
-		return;
-	}
-
-	pixels = new precision[ imageWidth
-							* imageHeight
-							* len];
-
-	if (! inp->read_image( subimage,
-							mip,
-							begin,
-							begin + len,
-							TypeDesc::PRECISION,
-							&pixels[0]))
-	{
-		std::cerr << "Could not read pixels from " << imageFileName
-				<< ", error = " << inp->geterror() << "\n";
-		return;
-	}
-	if (! inp->close ())
-	{
-		std::cerr << "Error closing " << imageFileName
-				<< ", error = " << inp->geterror() << "\n";
-		return;
-	}
-
-	ready = 2;
-}
-
-
-void NoPlayer::ImagePlaneData::generateGlTexture()
-{
-	glPixelStorei(GL_PACK_ALIGNMENT, 2);
-	glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
-
-	// Create an OpenGL texture identifier
-	glGenTextures(1, &glTexture);
-	glBindTexture(GL_TEXTURE_2D, glTexture);
-
-	// Setup filtering parameters for display
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-	int dataFormats[] = {0, GL_RED, GL_RG, GL_RGB, GL_RGBA};
-
-	glTexImage2D(GL_TEXTURE_2D, 0, internalFormats[len],
-					imageWidth, imageHeight, 0,
-					dataFormats[len], PRECISION_GL,
-					&pixels[0]);
-
-	// std::cout << glGetError() << std::endl;
-
-}
 
 
 void NoPlayer::configureOCIO()
@@ -1378,18 +1159,4 @@ void NoPlayer::createShaders()
 		std::cout << "Error validating program:\n" << log << '\n';
 		return;
 	}
-}
-
-
-int main(int argc, char**argv)
-{
-
-	NoPlayer noPlayerApp;
-
-	if (argc > 1)
-		noPlayerApp.init(argv[1]);
-
-	noPlayerApp.run();
-
-	return 0;
 }

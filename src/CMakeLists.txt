@@ -7,6 +7,8 @@ if(MSVC)
 endif()
 
 add_executable(noPlayer
+    application.cpp
+    imagePlane.cpp
     noPlayer.cpp
     )
 
