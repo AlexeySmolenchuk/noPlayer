@@ -12,7 +12,7 @@
 	#define PRECISION_GL GL_FLOAT
 	static int internalFormats[] = {0, GL_R32F, GL_RG32F, GL_RGB32F, GL_RGBA32F};
 #else
-	#include <half.h>
+	#include <Imath/half.h>
 	#define precision half
 	#define PRECISION HALF
 	#define PRECISION_GL GL_HALF_FLOAT
@@ -65,6 +65,7 @@ struct ImagePlane
 
     float gainValues = 1.0;
     float offsetValues = 0.0;
+    bool doOCIO = false;    // guess from data type and channel naming
 
     std::vector<ImagePlaneData> MIPs;
 };

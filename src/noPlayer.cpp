@@ -668,6 +668,7 @@ void NoPlayer::draw()
 		glUniform1f(glGetUniformLocation(shader, "offsetValues"), plane.offsetValues);
 		glUniform1i(glGetUniformLocation(shader, "soloing"), channelSoloing);
 		glUniform1i(glGetUniformLocation(shader, "nchannels"), planeData.len);
+		glUniform1i(glGetUniformLocation(shader, "doOCIO"), plane.doOCIO);
 
 		static float flash = 0;
 		flash += 1.0f/100;
@@ -717,7 +718,7 @@ bool NoPlayer::scanImageFile()
 	}
 
 	std::vector<std::string> predefined = {"RGBA", "XYZ", "UV", "rgba", "xyz", "uv"};
-	std::vector<ImagePlaneData> imagePlanesFlattened; // To Replace
+	std::vector<ImagePlaneData> imagePlanesFlattened; // Flattened data will be organized by names after reading
 
 	int mip = 0;
 	while (inp->seek_subimage(subimages, mip))
@@ -767,7 +768,7 @@ bool NoPlayer::scanImageFile()
 								plane.name = spec["Name"].get<std::string>();
 								plane.groupName = "";
 
-								imagePlanesFlattened.back().format = spec.channelformat(i).c_str();
+								plane.format = spec.channelformat(i).c_str();
 								plane.begin = i;
 								plane.len = 0;
 
@@ -854,36 +855,44 @@ bool NoPlayer::scanImageFile()
 		mip = 0;
 	}
 
+	// Store all image planes to the name based structure
 	std::unordered_map<std::string, size_t> map;
 
-	for (ImagePlaneData plane: imagePlanesFlattened)
+	for (ImagePlaneData planeData: imagePlanesFlattened)
 	{
 		std::string key;
 
-		if (!plane.name.empty())
-			key += plane.name + " ";
+		if (!planeData.name.empty())
+			key += planeData.name + " ";
 
-		if (!plane.groupName.empty())
-			key += plane.groupName + " ";
+		if (!planeData.groupName.empty())
+			key += planeData.groupName + " ";
 
-		if (!plane.channels.empty())
-			key += plane.channels;
+		if (!planeData.channels.empty())
+			key += planeData.channels;
 
 		size_t idx = imagePlanes.size();
+
 		if (map.find(key) == map.end())
 		{
 			map[key] = idx;
-			ImagePlane p;
-			p.name = plane.name;
-			p.groupName = plane.groupName;
-			p.channels = plane.channels;
-			p.nMIPs = 0;
-			imagePlanes.push_back(p);
+			ImagePlane plane;
+			plane.name = planeData.name;
+			plane.groupName = planeData.groupName;
+			plane.channels = planeData.channels;
+			plane.nMIPs = 0;
+
+			// By default apply OCIO only for non integer RGB (not xyz) channels
+			if ((planeData.channels == "RGB") || (planeData.channels == "RGBA") || (planeData.channels == "rgb") || (planeData.channels == "rgba"))
+				if ((planeData.format == "half") || (planeData.format == "float"))
+					plane.doOCIO = true;
+
+			imagePlanes.push_back(plane);
 		}
 		else
 			idx = map[key];
 
-		imagePlanes[idx].MIPs.push_back(plane);
+		imagePlanes[idx].MIPs.push_back(planeData);
 		imagePlanes[idx].nMIPs++;
 	}
 
@@ -924,15 +933,12 @@ void NoPlayer::configureOCIO()
 	// }
 
 	OCIO::ConstConfigRcPtr config;
+
 	// if(OCIO::IsEnvVariablePresent("OCIO"))
 	// 	config = OCIO::GetCurrentConfig();
 	// else
-		config = OCIO::Config::CreateFromBuiltinConfig("studio-config-v1.0.0_aces-v1.3_ocio-v2.1");
+		config = OCIO::Config::CreateFromBuiltinConfig(OCIO::BuiltinConfigRegistry::Get().getBuiltinConfigName(0));
 
-
-	float g_exposure_fstop{ 0.0f };
-	float g_display_gamma{ 1.0f };
-	int g_channelHot[4]{ 1, 1, 1, 1 };  // show rgb
 
 	std::string g_inputColorSpace;
 	std::string g_display;
@@ -942,12 +948,20 @@ void NoPlayer::configureOCIO()
 
 	g_display = config->getDefaultDisplay();
 	g_transformName = config->getDefaultView(g_display.c_str());
+
 	g_look = config->getDisplayViewLooks(g_display.c_str(), g_transformName.c_str());
 	g_inputColorSpace = OCIO::ROLE_SCENE_LINEAR;
 
-	// std::cout << g_display << std::endl;
-	// std::cout << g_transformName << std::endl;
-	// std::cout << g_look << std::endl;
+	// std::cout << "g_display " << g_display << std::endl;
+	// std::cout << "g_transformName " <<  g_transformName << std::endl;
+	// std::cout << "g_look " << g_look << std::endl;
+
+	// for (int i = 0; i < config->getNumViews(g_display.c_str()); i++)
+	// {
+	// 	std::cout <<
+	// 	config->getView(g_display.c_str(), i)
+	// 	<< std::endl;
+	// }
 
 	OCIO::DisplayViewTransformRcPtr transform = OCIO::DisplayViewTransform::Create();
 	transform->setSrc( g_inputColorSpace.c_str() );
@@ -986,6 +1000,7 @@ void NoPlayer::configureOCIO()
 		uniform int soloing;
 		uniform int nchannels;
 		uniform float flash;
+		uniform int doOCIO;
 	)glsl" +
 	std::string(shaderDesc->getShaderText()) +
 	R"glsl(
@@ -1017,7 +1032,7 @@ void NoPlayer::configureOCIO()
 				return;
 			}
 
-			if (nchannels >=3)
+			if (doOCIO==1)
 				FragColor = OCIODisplay(fragment);
 
 			if (soloing!=0){
@@ -1041,8 +1056,8 @@ void NoPlayer::configureOCIO()
 
 	// std::cout << shaderDesc->getShaderText() << std::endl;
 
-	// std::cout << shaderDesc->getNum3DTextures() << std::endl;
-	// std::cout << shaderDesc->getNumTextures() << std::endl;
+	// std::cout << "Num3DTextures:  " << shaderDesc->getNum3DTextures() << std::endl;
+	// std::cout << "tNumTextures:" << shaderDesc->getNumTextures() << std::endl;
 }
 
 
