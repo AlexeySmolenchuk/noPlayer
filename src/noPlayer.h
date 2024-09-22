@@ -36,6 +36,7 @@ private:
 	void createPlane();
 	void addShader(GLuint program, const char* shaderCode, GLenum type);
 	void createShaders();
+	void loader();
 
 private:
 	GLFWwindow *mainWindow;
@@ -45,6 +46,9 @@ private:
 	unsigned int mips;
 
 	std::vector<ImagePlane> imagePlanes;
+	std::vector<ImagePlaneData*> loadingQueue;
+	std::mutex mtx;
+
 	int activePlaneIdx;
 	int activeMIP;
 

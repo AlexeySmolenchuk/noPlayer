@@ -46,12 +46,23 @@ struct ImagePlaneData
     int windowOffsetY;
 
     bool windowMatchData; // is Data Window match Display Window
+    float pixelAspect;
 
     int begin; // index in oiio spec
     int len;
     precision *pixels;	// fill deferred
     GLuint glTexture;	// fill deferred
-    int ready = 0;
+
+    enum state
+    {
+        NOT_ISSUED,
+        ISSUED,
+        LOADING_STARTED,
+        LOADED,
+        TEXTURE_GENERATED,
+    };
+
+    state ready = NOT_ISSUED;
 
     ~ImagePlaneData() { delete[] pixels;}
 };

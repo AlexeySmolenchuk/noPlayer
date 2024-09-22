@@ -174,6 +174,8 @@ NoPlayer::NoPlayer()
 	createPlane();
 	createShaders();
 
+	std::thread(&NoPlayer::loader, this).detach();
+	std::thread(&NoPlayer::loader, this).detach();
 };
 
 
@@ -193,8 +195,16 @@ NoPlayer::init(const char* fileName)
 	activeMIP = 0;
 
 	// Preload
-	std::thread(&ImagePlaneData::load, std::ref(imagePlanes[activePlaneIdx].MIPs[activeMIP])).detach();
-	imagePlanes[activePlaneIdx].MIPs[activeMIP].ready = 1;
+	std::unique_lock<std::mutex> lock(mtx);
+	loadingQueue.clear();
+	for(auto ip = imagePlanes.rbegin(); ip != imagePlanes.rend(); ++ip)
+	{
+		for(auto mip = ip->MIPs.rbegin(); mip != ip->MIPs.rend(); ++mip)
+		{
+			loadingQueue.push_back(&(*mip));
+			mip->ready = ImagePlaneData::ISSUED;
+		}
+	}
 }
 
 
@@ -207,47 +217,79 @@ NoPlayer::~NoPlayer()
 	glfwTerminate();
 }
 
+void NoPlayer::loader()
+{
+	while (true)
+	{
+		mtx.lock();
+		if (!loadingQueue.empty())
+		{
+			size_t idx = loadingQueue.size() - 1;
+			ImagePlaneData* plane = loadingQueue[idx];
+
+			loadingQueue.erase(loadingQueue.begin() + idx);
+
+			mtx.unlock();
+
+			if (plane->pixels == nullptr)
+				plane->load();
+		}
+		else
+		{
+			mtx.unlock();
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		}
+
+	}
+}
 
 void NoPlayer::run()
 {
 	while (!glfwWindowShouldClose(mainWindow))
 	{
 		glfwPollEvents();
+		draw();
 
 		if (imagePlanes.size())
 		{
 			ImagePlaneData &plane = imagePlanes[activePlaneIdx].MIPs[activeMIP];
 
-			if ( plane.ready == 0) // not issued yet
+			if ( plane.ready < ImagePlaneData::LOADING_STARTED)
 			{
-				std::thread(&ImagePlaneData::load, std::ref(plane)).detach();
-				plane.ready = 1; // just issued
+				std::unique_lock<std::mutex> lock(mtx);
+				if (loadingQueue.back() != &plane)
+				{
+					loadingQueue.push_back(&plane);
+					plane.ready = ImagePlaneData::ISSUED;
+				}
+			}
+			else
+			{
+				// we can preload next AOV
+				int next = (activePlaneIdx + 1)%imagePlanes.size();
+				if ( imagePlanes[next].MIPs[activeMIP].ready == ImagePlaneData::NOT_ISSUED)
+				{
+					std::unique_lock<std::mutex> lock(mtx);
+					loadingQueue.push_back(&imagePlanes[next].MIPs[activeMIP]);
+					imagePlanes[next].MIPs[activeMIP].ready = ImagePlaneData::ISSUED;
+				}
+
+				// preload next MIP
+				int nextMIP = (activeMIP + 1) % imagePlanes[activePlaneIdx].MIPs.size();
+				if ( imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == ImagePlaneData::NOT_ISSUED)
+				{
+					std::unique_lock<std::mutex> lock(mtx);
+					loadingQueue.push_back(&imagePlanes[activePlaneIdx].MIPs[nextMIP]);
+					imagePlanes[activePlaneIdx].MIPs[nextMIP].ready = ImagePlaneData::ISSUED;
+				}
 			}
 
-			// we can preload next AOV
-			int next = (activePlaneIdx + 1)%imagePlanes.size();
-			if ( imagePlanes[next].MIPs[activeMIP].ready == 0) // not issued yet
-			{
-				std::thread(&ImagePlaneData::load, std::ref(imagePlanes[next].MIPs[activeMIP])).detach();
-				imagePlanes[next].MIPs[activeMIP].ready = 1; // just issued
-			}
-
-			// preload next MIP
-			int nextMIP = (activeMIP + 1) % imagePlanes[activePlaneIdx].MIPs.size();
-			if ( imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == 0) // not issued yet
-			{
-				std::thread(&ImagePlaneData::load, std::ref(imagePlanes[activePlaneIdx].MIPs[nextMIP])).detach();
-				imagePlanes[activePlaneIdx].MIPs[nextMIP].ready = 1; // just issued
-			}
-
-			if ( plane.ready == 2) // pixels loaded in RAM
+			if ( plane.ready == ImagePlaneData::LOADED)
 			{
 				plane.generateGlTexture();
-				plane.ready = 3; // corresponding gl texture created
+				plane.ready = ImagePlaneData::TEXTURE_GENERATED;
 			}
 		}
-
-		draw();
 	}
 }
 
@@ -508,7 +550,14 @@ void NoPlayer::draw()
 		for (int n = 0; n < imagePlanes.size(); n++)
 		{
 
-			ImGui::TextColored( ImVec4(0.5,0.5,0.5,1), imagePlanes[n].MIPs[activeMIP].format.c_str());
+			const ImVec4 clrs[] = {
+				ImVec4(0.35, 0.35, 0.35, 1),
+				ImVec4(0.2, 0.2, 0.2, 1),
+				ImVec4(0.65, 0.65, 0.65, 1),
+				ImVec4(0.5, 0.5, 0.5, 1),
+				ImVec4(0.5, 0.5, 0.5, 1)
+				};
+			ImGui::TextColored( clrs[imagePlanes[n].MIPs[activeMIP].ready], "%5s", imagePlanes[n].MIPs[activeMIP].format.c_str());
 			ImGui::SameLine();
 
 			if(activePlaneIdx == n)
@@ -566,6 +615,7 @@ void NoPlayer::draw()
 			ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.5f, 0.5f, 0.5f, 0.15f));
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
 			ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, ImVec4(0.5f, 0.5f, 0.5f, 0.1f));
+			ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
 
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_None
 										| ImGuiWindowFlags_NoDecoration
@@ -577,7 +627,7 @@ void NoPlayer::draw()
 
 			ImGui::Begin( "Gain", nullptr, windowFlags);
 			plane.gainValues = std::clamp( plane.gainValues, -100000.f, 100000.f);
-			ImGui::DragFloat("Gain", &(plane.gainValues), std::fmax(0.0001f, std::fabs(plane.gainValues)*0.01f));
+			ImGui::DragFloat("Gain", &(plane.gainValues), std::fmax(0.00001f, std::fabs(plane.gainValues)*0.01f), 0, 0, "%5f");
 			ImGui::End();
 
 
@@ -589,11 +639,18 @@ void NoPlayer::draw()
 			ImGui::DragFloat("Offset", &(plane.offsetValues), std::fmax(0.0001f, std::fabs(plane.offsetValues)*0.01f));
 			ImGui::End();
 
-			ImGui::PopStyleColor(5);
+			ImGui::SetNextWindowPos(ImVec2(displayW/2 + 160, displayH - 35));
+			ImGui::SetNextWindowSize(ImVec2(150, 0));
+
+			ImGui::Begin( "OCIO", nullptr, windowFlags);
+			ImGui::Checkbox("OCIO", &(plane.doOCIO));
+			ImGui::End();
+
+			ImGui::PopStyleColor(6);
 		}
 	}
 
-	if(planeData.ready != 3)
+	if(planeData.ready != ImagePlaneData::TEXTURE_GENERATED)
 	{
 		const char* message = "Loading...";
 		ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2.f);
@@ -613,7 +670,7 @@ void NoPlayer::draw()
 
 		ImVec2 mousePos = ImGui::GetMousePos();
 		ImVec2 coords = mousePos - ImVec2(displayW, displayH)*0.5f - ImVec2(offsetX, offsetY) + shift;
-		coords /= scale * compensateMIP * factor;
+		coords /= ImVec2(planeData.pixelAspect, 1.0) * scale * compensateMIP * factor;
 		coords += ImVec2(planeData.imageWidth, planeData.imageHeight)*0.5f - ImVec2(centerX, centerY);
 
 		if(coords.x >= 0 && coords.x < planeData.imageWidth && coords.y >= 0 && coords.y < planeData.imageHeight)
@@ -635,7 +692,7 @@ void NoPlayer::draw()
 										(int)(coords.y + planeData.imageOffsetY - planeData.windowOffsetY));
 			ImGui::Text("(%d, %d)", (int)(coords.x), (int)(coords.y));
 
-			if (planeData.ready>1)
+			if (planeData.ready >= ImagePlaneData::LOADED)
 				for (int i=0; i<planeData.len; i++)
 					ImGui::Text("%s %g",  planeData.channels.substr(i, 1).c_str(), float(planeData.pixels[idx+i]));
 			ImGui::End();
@@ -661,7 +718,7 @@ void NoPlayer::draw()
 
 		glUniform2f(glGetUniformLocation(shader, "offset"),  (offsetX - shift.x + centerX * scale * factor * compensateMIP)/(float)displayW,
 															-(offsetY - shift.y + centerY * scale * factor * compensateMIP)/(float)displayH);
-		glUniform2f(glGetUniformLocation(shader, "scale"),  scale * factor * compensateMIP * planeData.imageWidth/(float)displayW,
+		glUniform2f(glGetUniformLocation(shader, "scale"),  scale * factor * compensateMIP * planeData.imageWidth/(float)displayW * planeData.pixelAspect,
 															scale * factor * compensateMIP * planeData.imageHeight/(float)displayH);
 
 		glUniform1f(glGetUniformLocation(shader, "gainValues"), plane.gainValues);
@@ -688,7 +745,7 @@ void NoPlayer::draw()
 		glUseProgram(frameShader);
 		glUniform2f(glGetUniformLocation(frameShader, "offset"), (offsetX - shift.x)/(float)displayW,
 																-(offsetY - shift.y)/(float)displayH);
-		glUniform2f(glGetUniformLocation(frameShader, "scale"), scale * factor * compensateMIP * planeData.windowWidth/(float)displayW,
+		glUniform2f(glGetUniformLocation(frameShader, "scale"), scale * factor * compensateMIP * planeData.windowWidth/(float)displayW * planeData.pixelAspect,
 																scale * factor * compensateMIP * planeData.windowHeight/(float)displayH);
 		glBindVertexArray(VAO);
 		glDrawArrays(GL_LINE_LOOP, 0, 4);
@@ -847,6 +904,7 @@ bool NoPlayer::scanImageFile()
 				}
 
 				imagePlanesFlattened.back().windowMatchData = windowMatchData;
+				imagePlanesFlattened.back().pixelAspect = spec.get_float_attribute("PixelAspectRatio");
 			}
 			mip++;
 			mips++;
@@ -948,6 +1006,8 @@ void NoPlayer::configureOCIO()
 
 	g_display = config->getDefaultDisplay();
 	g_transformName = config->getDefaultView(g_display.c_str());
+
+	// std::cout << "ActiveViews: " << config->getActiveViews() << std::endl;
 
 	g_look = config->getDisplayViewLooks(g_display.c_str(), g_transformName.c_str());
 	g_inputColorSpace = OCIO::ROLE_SCENE_LINEAR;

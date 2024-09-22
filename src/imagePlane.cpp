@@ -5,6 +5,9 @@ void ImagePlaneData::load()
 {
 	using namespace OIIO;
 
+	// std::cout << name << groupName << channels << std::endl;
+	ready = LOADING_STARTED;
+	
 	auto inp = ImageInput::open (imageFileName);
 	if (! inp)
 	{
@@ -35,7 +38,7 @@ void ImagePlaneData::load()
 		return;
 	}
 
-	ready = 2;
+	ready = LOADED;
 }
 
 
