@@ -12,7 +12,7 @@ add_executable(noPlayer
     noPlayer.cpp
     scanImageFile.cpp
     configureOCIO.cpp
-    oglroutine.cpp
+    oglRoutine.cpp
     )
 
 target_link_libraries(noPlayer PRIVATE
