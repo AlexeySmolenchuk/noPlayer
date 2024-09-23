@@ -1,40 +1,34 @@
-MIP organize
-    + walking by mips independent from walking by image planes
-
 Color Correction
-    + CC settings per image planes
-    auto find range
+    [ ] auto find range
+
+[ ] Inspect Values from Texture Data
 
 OCIO
-    OCIO config selector
-    OCIO transform selector
-    LUT support
-    colormapping for LDR images
+    [ ] OCIO config selector
+    [ ] OCIO transform selector
+    [ ] LUT support
+    [ ] colormapping for LDR images
 
-Shader
-    + one channel image display monochromatic
-    + don't apply color transformation to non RGB image planes
-    + visualize Nan and Inf
+[ ] Selective Float/Half/int16/int8 precision
+[ ] Alpha checking
 
-Selective Float/Half precision
-Alpha checking
+[ ] Display info about storage and compression
+[ ] Display metadata
 
-Display info about storage and compression
-Display metadata
-
-visual hotkeys map
-
-thread pool for image plane loading
+[ ] Add Help
+    [ ] Visual hotkeys map
+[ ] Add Credits & License
 
 
-List of shortcuts:
-` 1 2 3 4 (top row) RGB/R/G/B/A
-0 - =     (top row) Exposure Reset/EV-/EV+
-[ ]       Next/Previous AOV
-PgUp PgDn Next/Previous MIP
-F         Fit/100%
-I         Inspect Tool
-F11       Fullscreen
-H         Hide UI
-+ -       (numpad) ZoomIn/ZoomOut
-Esc       Exit
+    List of shortcuts:
+    ` 1 2 3 4 (top row) RGB/R/G/B/A
+    0 - =     (top row) Exposure Reset/EV-/EV+
+    [         Next AOV
+    ]         Previous AOV
+    PgUp PgDn Next/Previous MIP
+    F         Fit/100%
+    I         Inspect Tool
+    F11       Fullscreen
+    H         Hide UI
+    + -       (numpad) ZoomIn/ZoomOut
+    Esc       Exit
