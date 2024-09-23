@@ -10,6 +10,9 @@ add_executable(noPlayer
     application.cpp
     imagePlane.cpp
     noPlayer.cpp
+    scanImageFile.cpp
+    configureOCIO.cpp
+    oglroutine.cpp
     )
 
 target_link_libraries(noPlayer PRIVATE
