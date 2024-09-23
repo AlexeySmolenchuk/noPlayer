@@ -528,6 +528,9 @@ void NoPlayer::draw()
 			ImGui::Text("[MIP %d]", planeData.mip);
 		}
 
+		if (planeData.pixelAspect != 1.0)
+			ImGui::Text("Pixel Aspect: %g", planeData.pixelAspect);
+
 		ImGui::Text("Zoom %.01f%%", scale*factor*compensateMIP*100);
 		ImGui::PopStyleColor();
 		ImGui::End();
@@ -622,28 +625,30 @@ void NoPlayer::draw()
 										| ImGuiWindowFlags_NoBackground
 										;
 
-			ImGui::SetNextWindowPos(ImVec2(displayW/2-150, displayH - 35));
+			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 220, displayH - 35));
 			ImGui::SetNextWindowSize(ImVec2(150, 0));
 
 			ImGui::Begin( "Gain", nullptr, windowFlags);
 			plane.gainValues = std::clamp( plane.gainValues, -100000.f, 100000.f);
-			ImGui::DragFloat("Gain", &(plane.gainValues), std::fmax(0.00001f, std::fabs(plane.gainValues)*0.01f), 0, 0, "%5f");
+			ImGui::DragFloat("Gain", &(plane.gainValues), std::fmax(0.00001f, std::fabs(plane.gainValues)*0.01f), 0, 0, "%g");
 			ImGui::End();
 
 
-			ImGui::SetNextWindowPos(ImVec2(displayW/2, displayH - 35));
+			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 70, displayH - 35));
 			ImGui::SetNextWindowSize(ImVec2(150, 0));
 
 			ImGui::Begin( "Offset", nullptr, windowFlags);
 			plane.offsetValues = std::clamp( plane.offsetValues, -100000.f, 100000.f);
-			ImGui::DragFloat("Offset", &(plane.offsetValues), std::fmax(0.0001f, std::fabs(plane.offsetValues)*0.01f));
+			ImGui::DragFloat("Offset", &(plane.offsetValues), std::fmax(0.0001f, std::fabs(plane.offsetValues)*0.01f), 0, 0, "%g");
 			ImGui::End();
 
-			ImGui::SetNextWindowPos(ImVec2(displayW/2 + 160, displayH - 35));
+			ImGui::SetNextWindowPos(ImVec2(displayW/2 + 90, displayH - 35));
 			ImGui::SetNextWindowSize(ImVec2(150, 0));
 
 			ImGui::Begin( "OCIO", nullptr, windowFlags);
 			ImGui::Checkbox("OCIO", &(plane.doOCIO));
+			ImGui::SameLine();
+			ImGui::Checkbox("NaN", &(plane.checkNaN));
 			ImGui::End();
 
 			ImGui::PopStyleColor(6);
@@ -726,6 +731,7 @@ void NoPlayer::draw()
 		glUniform1i(glGetUniformLocation(shader, "soloing"), channelSoloing);
 		glUniform1i(glGetUniformLocation(shader, "nchannels"), planeData.len);
 		glUniform1i(glGetUniformLocation(shader, "doOCIO"), plane.doOCIO);
+		glUniform1i(glGetUniformLocation(shader, "checkNaN"), plane.checkNaN);
 
 		static float flash = 0;
 		flash += 1.0f/100;
@@ -904,7 +910,7 @@ bool NoPlayer::scanImageFile()
 				}
 
 				imagePlanesFlattened.back().windowMatchData = windowMatchData;
-				imagePlanesFlattened.back().pixelAspect = spec.get_float_attribute("PixelAspectRatio");
+				imagePlanesFlattened.back().pixelAspect = spec.get_float_attribute("PixelAspectRatio", 1.0);
 			}
 			mip++;
 			mips++;
@@ -1061,6 +1067,7 @@ void NoPlayer::configureOCIO()
 		uniform int nchannels;
 		uniform float flash;
 		uniform int doOCIO;
+		uniform int checkNaN;
 	)glsl" +
 	std::string(shaderDesc->getShaderText()) +
 	R"glsl(
@@ -1071,13 +1078,23 @@ void NoPlayer::configureOCIO()
 				float f = abs(flash-0.5)*2.0;
 				if (isnan(fragment[i]))
 				{
-					FragColor = vec4(1, 0.25, 0, 0) * f;
-					return;
+					if (checkNaN==1)
+					{
+						FragColor = vec4(1, 0.25, 0, 0) * f;
+						return;
+					}
+					else
+						fragment[i] = 0;
 				}
 				else if (isinf(fragment[i]))
 				{
-					FragColor = vec4(1, 0.25, 0, 0) * (1.0-f);
-					return;
+					if (checkNaN==1)
+					{
+						FragColor = vec4(1, 0.25, 0, 0) * (1.0-f);
+						return;
+					}
+					else
+						fragment[i] = 0;
 				}
 			}
 

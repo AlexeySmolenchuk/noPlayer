@@ -77,6 +77,7 @@ struct ImagePlane
     float gainValues = 1.0;
     float offsetValues = 0.0;
     bool doOCIO = false;    // guess from data type and channel naming
+    bool checkNaN = true;
 
     std::vector<ImagePlaneData> MIPs;
 };
