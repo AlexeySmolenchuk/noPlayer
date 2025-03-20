@@ -347,13 +347,13 @@ void NoPlayer::draw()
 	}
 
 
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_RightBracket)))
+	if (ImGui::IsKeyPressed(ImGuiKey_RightBracket))
 	{
 		activePlaneIdx = (activePlaneIdx+1)%imagePlanes.size();
 		channelSoloing = 0;
 	}
 
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_LeftBracket)))
+	if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket))
 	{
 		activePlaneIdx = (imagePlanes.size()+activePlaneIdx-1)%imagePlanes.size();
 		channelSoloing = 0;
@@ -362,10 +362,10 @@ void NoPlayer::draw()
 
 	ImagePlane &plane = imagePlanes[activePlaneIdx];
 
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_PageUp)) || ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Keypad9)))
+	if (ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_Keypad9))
 		activeMIP = std::max(0, activeMIP-1);
 
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_PageDown)) || ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Keypad3)))
+	if (ImGui::IsKeyPressed(ImGuiKey_PageDown) || ImGui::IsKeyPressed(ImGuiKey_Keypad3))
 		activeMIP = std::min( plane.nMIPs-1 , activeMIP+1);
 
 
@@ -390,7 +390,7 @@ void NoPlayer::draw()
 	}
 
 	//Zoom in
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_KeypadAdd)))
+	if (ImGui::IsKeyPressed(ImGuiKey_KeypadAdd))
 	{
 		targetOffsetX = offsetX * 2;
 		targetOffsetY = offsetY * 2;
@@ -399,7 +399,7 @@ void NoPlayer::draw()
 	}
 
 	// Zoom out
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_KeypadSubtract)))
+	if (ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract))
 	{
 		targetOffsetX = offsetX * 0.5f;
 		targetOffsetY = offsetY * 0.5f;
@@ -448,7 +448,7 @@ void NoPlayer::draw()
 		offsetY += ImGui::GetIO().MouseDelta.y;
 	}
 
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_F)))
+	if (ImGui::IsKeyPressed(ImGuiKey_F))
 	{
 		// with this little offset we align image and screen pixels for even and odd resolutions
 		offsetX = 0.25;
@@ -460,22 +460,22 @@ void NoPlayer::draw()
 	}
 
 	static bool ui = true;
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_H)))
+	if (ImGui::IsKeyPressed(ImGuiKey_H))
 		ui = !ui;
 
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_0)))
+	if (ImGui::IsKeyPressed(ImGuiKey_0))
 	{
 		plane.gainValues = 1.0;
 		plane.offsetValues = 0.0;
 	}
 
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Equal)))
+	if (ImGui::IsKeyPressed(ImGuiKey_Equal))
 		plane.gainValues *= 2.0;
 
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Minus)))
+	if (ImGui::IsKeyPressed(ImGuiKey_Minus))
 		plane.gainValues *= 0.5;
 
-	if (ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_I)))
+	if (ImGui::IsKeyPressed(ImGuiKey_I))
 		inspect = !inspect;
 
 
