@@ -7,7 +7,10 @@ void ImagePlaneData::load()
 
 	// std::cout << name << groupName << channels << std::endl;
 	ready = LOADING_STARTED;
-	
+
+	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };
+	OIIO::attribute ("missingcolor", TypeDesc("float[4]"), &missing);
+
 	auto inp = ImageInput::open (imageFileName);
 	if (! inp)
 	{
