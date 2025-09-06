@@ -93,19 +93,6 @@ void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int 
 		}
 	}
 
-	NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(mainWindow));
-
-	if ( glfwGetKey( mainWindow, GLFW_KEY_GRAVE_ACCENT ) == GLFW_PRESS )
-		view->setChannelSoloing(0);
-	if ( glfwGetKey( mainWindow, GLFW_KEY_1 ) == GLFW_PRESS )
-		view->setChannelSoloing(1);
-	if ( glfwGetKey( mainWindow, GLFW_KEY_2 ) == GLFW_PRESS )
-		view->setChannelSoloing(2);
-	if ( glfwGetKey( mainWindow, GLFW_KEY_3 ) == GLFW_PRESS )
-		view->setChannelSoloing(3);
-	if ( glfwGetKey( mainWindow, GLFW_KEY_4 ) == GLFW_PRESS )
-		view->setChannelSoloing(4);
-
 	if ( glfwGetKey( mainWindow, GLFW_KEY_ESCAPE ) == GLFW_PRESS )
 		glfwSetWindowShouldClose(mainWindow, GL_TRUE);
 }
@@ -298,7 +285,6 @@ void NoPlayer::run()
 
 void NoPlayer::draw()
 {
-
 	ImGui_ImplOpenGL3_NewFrame();
 	ImGui_ImplGlfw_NewFrame();
 
@@ -346,138 +332,156 @@ void NoPlayer::draw()
 		return;
 	}
 
-
-	if (ImGui::IsKeyPressed(ImGuiKey_RightBracket))
-	{
-		activePlaneIdx = (activePlaneIdx+1)%imagePlanes.size();
-		channelSoloing = 0;
-	}
-
-	if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket))
-	{
-		activePlaneIdx = (imagePlanes.size()+activePlaneIdx-1)%imagePlanes.size();
-		channelSoloing = 0;
-	}
-
-
 	ImagePlane &plane = imagePlanes[activePlaneIdx];
-
-	if (ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_Keypad9))
-		activeMIP = std::max(0, activeMIP-1);
-
-	if (ImGui::IsKeyPressed(ImGuiKey_PageDown) || ImGui::IsKeyPressed(ImGuiKey_Keypad3))
-		activeMIP = std::min( plane.nMIPs-1 , activeMIP+1);
-
 
 	ImagePlaneData &planeData = plane.MIPs[activeMIP];
 	float compensateMIP = powf(2.0f, planeData.mip);
 
+	static bool ui = true;
 	static int lag = 0;
 	static float targetScale = scale;
 	static float targetOffsetX = offsetX;
 	static float targetOffsetY = offsetY;
-
-	// Zoom by scrolling
-	if (!io.WantCaptureMouse && io.MouseWheel!=0.0)
-	{
-		ImVec2 scalePivot = ImGui::GetMousePos() - ImVec2(displayW, displayH)/2.f - ImVec2(offsetX, offsetY);
-		float factor = powf(2, io.MouseWheel/3.0f);
-		ImVec2 temp = scalePivot*(factor-1);
-		offsetX = offsetX - temp.x;
-		offsetY = offsetY - temp.y;
-
-		scale *= powf(2, io.MouseWheel/3.f);
-	}
-
-	//Zoom in
-	if (ImGui::IsKeyPressed(ImGuiKey_KeypadAdd))
-	{
-		targetOffsetX = offsetX * 2;
-		targetOffsetY = offsetY * 2;
-		targetScale = scale * 2;
-		lag = 4;
-	}
-
-	// Zoom out
-	if (ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract))
-	{
-		targetOffsetX = offsetX * 0.5f;
-		targetOffsetY = offsetY * 0.5f;
-		targetScale = scale * 0.5f;
-		lag = 4;
-	}
-
-	if (lag)
-	{
-		float f = 1.0f/lag;
-		scale = scale * (1.0f-f) + targetScale * f;
-		offsetX = offsetX * (1.0f-f) + targetOffsetX * f;
-		offsetY = offsetY * (1.0f-f) + targetOffsetY * f;
-		lag--;
-	}
-
-	// Scale with RMB
-	// While adjusting zoom values are updated in "shift" and "factor"
-	// When finished (RMB released) these values are baked into scale and offsetX offsetY
 	static float factor = 1.0;
 	static ImVec2 shift(0, 0);
-	if (io.MouseDown[1])
+
+	// Mouse actions
+	if (!io.WantCaptureMouse)
 	{
-		ImVec2 delta = ImGui::GetMousePos() - io.MouseClickedPos[1];
+		// Zoom by scrolling
+		if (io.MouseWheel!=0.0)
+		{
+			ImVec2 scalePivot = ImGui::GetMousePos() - ImVec2(displayW, displayH)/2.f - ImVec2(offsetX, offsetY);
+			float factor = powf(2, io.MouseWheel/3.0f);
+			ImVec2 temp = scalePivot*(factor-1);
+			offsetX = offsetX - temp.x;
+			offsetY = offsetY - temp.y;
 
-		float drag = (delta.x - delta.y) * 0.01f;
-		factor = powf( 2.f, drag / 3.0f);
+			scale *= powf(2, io.MouseWheel/3.f);
+		}
 
-		ImVec2 scalePivot = io.MouseClickedPos[1] - ImVec2(displayW, displayH)/2.f - ImVec2(offsetX, offsetY);
-		shift = scalePivot * (factor - 1);
+		// Scale with RMB
+		// While adjusting zoom values are updated in "shift" and "factor"
+		// When finished (RMB released) these values are baked into scale and offsetX offsetY
+		if (io.MouseDown[1])
+		{
+			ImVec2 delta = ImGui::GetMousePos() - io.MouseClickedPos[1];
+
+			float drag = (delta.x - delta.y) * 0.01f;
+			factor = powf( 2.f, drag / 3.0f);
+
+			ImVec2 scalePivot = io.MouseClickedPos[1] - ImVec2(displayW, displayH)/2.f - ImVec2(offsetX, offsetY);
+			shift = scalePivot * (factor - 1);
+		}
+		else if (io.MouseReleased[1])
+		{
+			scale *= factor;
+			offsetX -= shift.x;
+			offsetY -= shift.y;
+
+			shift = ImVec2(0, 0);
+			factor = 1.0;
+		}
+
+		// Pan with MMB
+		if (io.MouseDown[2])
+		{
+			offsetX += ImGui::GetIO().MouseDelta.x;
+			offsetY += ImGui::GetIO().MouseDelta.y;
+		}
 	}
-	else if (io.MouseReleased[1])
+
+	// Shortcuts
+	if (!io.WantCaptureKeyboard)
 	{
-		scale *= factor;
-		offsetX -= shift.x;
-		offsetY -= shift.y;
+		if (ImGui::IsKeyPressed(ImGuiKey_RightBracket))
+		{
+			activePlaneIdx = (activePlaneIdx+1)%imagePlanes.size();
+			channelSoloing = 0;
+		}
 
-		shift = ImVec2(0, 0);
-		factor = 1.0;
+		if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket))
+		{
+			activePlaneIdx = (imagePlanes.size()+activePlaneIdx-1)%imagePlanes.size();
+			channelSoloing = 0;
+		}
+		if (ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_Keypad9))
+			activeMIP = std::max(0, activeMIP-1);
+
+		if (ImGui::IsKeyPressed(ImGuiKey_PageDown) || ImGui::IsKeyPressed(ImGuiKey_Keypad3))
+			activeMIP = std::min( plane.nMIPs-1 , activeMIP+1);
+
+		if (ImGui::IsKeyPressed(ImGuiKey_F))
+		{
+			// with this little offset we align image and screen pixels for even and odd resolutions
+			offsetX = 0.25;
+			offsetY = 0.25;
+			if (scale == 1.0/compensateMIP)
+				scale = std::min(float(displayH)/float(planeData.windowHeight), float(displayW)/float(planeData.windowWidth))/compensateMIP;
+			else
+				scale = 1.0f/compensateMIP;
+		}
+
+		if (ImGui::IsKeyPressed(ImGuiKey_H))
+			ui = !ui;
+
+		if (ImGui::IsKeyPressed(ImGuiKey_0))
+		{
+			plane.gainValues = 1.0;
+			plane.offsetValues = 0.0;
+		}
+			
+		//Zoom in
+		if (ImGui::IsKeyPressed(ImGuiKey_KeypadAdd))
+		{
+			targetOffsetX = offsetX * 2;
+			targetOffsetY = offsetY * 2;
+			targetScale = scale * 2;
+			lag = 4;
+		}
+
+		// Zoom out
+		if (ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract))
+		{
+			targetOffsetX = offsetX * 0.5f;
+			targetOffsetY = offsetY * 0.5f;
+			targetScale = scale * 0.5f;
+			lag = 4;
+		}
+
+		if (lag)
+		{
+			float f = 1.0f/lag;
+			scale = scale * (1.0f-f) + targetScale * f;
+			offsetX = offsetX * (1.0f-f) + targetOffsetX * f;
+			offsetY = offsetY * (1.0f-f) + targetOffsetY * f;
+			lag--;
+		}
+
+		if (ImGui::IsKeyPressed(ImGuiKey_Equal))
+			plane.gainValues *= 2.0;
+
+		if (ImGui::IsKeyPressed(ImGuiKey_Minus))
+			plane.gainValues *= 0.5;
+
+		if (ImGui::IsKeyPressed(ImGuiKey_I))
+			inspect = !inspect;
+
+		if (ImGui::IsKeyPressed(ImGuiKey_GraveAccent))
+			setChannelSoloing(0);
+
+		if (ImGui::IsKeyPressed(ImGuiKey_1))
+			setChannelSoloing(1);
+
+		if (ImGui::IsKeyPressed(ImGuiKey_2))
+			setChannelSoloing(2);
+
+		if (ImGui::IsKeyPressed(ImGuiKey_3))
+			setChannelSoloing(3);
+
+		if (ImGui::IsKeyPressed(ImGuiKey_4))
+			setChannelSoloing(4);
 	}
-
-	// Pan
-	if (io.MouseDown[2])
-	{
-		offsetX += ImGui::GetIO().MouseDelta.x;
-		offsetY += ImGui::GetIO().MouseDelta.y;
-	}
-
-	if (ImGui::IsKeyPressed(ImGuiKey_F))
-	{
-		// with this little offset we align image and screen pixels for even and odd resolutions
-		offsetX = 0.25;
-		offsetY = 0.25;
-		if (scale == 1.0/compensateMIP)
-			scale = std::min(float(displayH)/float(planeData.windowHeight), float(displayW)/float(planeData.windowWidth))/compensateMIP;
-		else
-			scale = 1.0f/compensateMIP;
-	}
-
-	static bool ui = true;
-	if (ImGui::IsKeyPressed(ImGuiKey_H))
-		ui = !ui;
-
-	if (ImGui::IsKeyPressed(ImGuiKey_0))
-	{
-		plane.gainValues = 1.0;
-		plane.offsetValues = 0.0;
-	}
-
-	if (ImGui::IsKeyPressed(ImGuiKey_Equal))
-		plane.gainValues *= 2.0;
-
-	if (ImGui::IsKeyPressed(ImGuiKey_Minus))
-		plane.gainValues *= 0.5;
-
-	if (ImGui::IsKeyPressed(ImGuiKey_I))
-		inspect = !inspect;
-
 
 	if (ui)
 	{
@@ -501,8 +505,6 @@ void NoPlayer::draw()
 			ImGui::Text("[No MIPs]");
 		else
 			ImGui::Text("[%d MIPs]", mips);
-
-
 
 		if (planeData.windowMatchData)
 		{
