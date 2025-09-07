@@ -506,6 +506,21 @@ void NoPlayer::draw()
 		else
 			ImGui::Text("[%d MIPs]", mips);
 
+		ImGui::SameLine();
+		ImGui::Text(planeData.compression.c_str());
+
+		if ( planeData.quality != -1)
+		{
+			ImGui::SameLine();
+			ImGui::Text("%d", planeData.quality);
+		}
+
+		ImGui::SameLine();
+		if ( (planeData.tile_width != 0) && (planeData.tile_height != 0))
+			ImGui::Text("tiled: %dx%d", planeData.tile_height, planeData.tile_height);
+		else
+			ImGui::Text("scanline");
+
 		if (planeData.windowMatchData)
 		{
 			ImGui::Text("%dx%d", planeData.imageWidth, planeData.imageHeight);

@@ -5,7 +5,6 @@ void ImagePlaneData::load()
 {
 	using namespace OIIO;
 
-	// std::cout << name << groupName << channels << std::endl;
 	ready = LOADING_STARTED;
 
 	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };

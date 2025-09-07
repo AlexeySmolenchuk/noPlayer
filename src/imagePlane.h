@@ -19,6 +19,8 @@
 	static int internalFormats[] = {0, GL_R16F, GL_RG16F, GL_RGB16F, GL_RGBA16F};
 #endif
 
+
+// Represent image data and properties of certain level of MIP
 struct ImagePlaneData
 {
     void load();
@@ -32,6 +34,11 @@ struct ImagePlaneData
     std::string groupName;	// group name if exists
     std::string channels;	// channels names after dot concatenated for corresponding group
     std::string format;		// string representation of data type
+
+    std::string compression;
+    int quality;
+    int tile_width;
+    int tile_height;
 
     // Data Window
     unsigned int imageWidth;
@@ -67,6 +74,8 @@ struct ImagePlaneData
     ~ImagePlaneData() { delete[] pixels;}
 };
 
+
+// Represent individual channel 'group' within multichannel or multipart image 
 struct ImagePlane
 {
     std::string name;		// name of sub-image from metadata
@@ -79,5 +88,5 @@ struct ImagePlane
     bool doOCIO = false;    // guess from data type and channel naming
     bool checkNaN = true;
 
-    std::vector<ImagePlaneData> MIPs;
+    std::vector<ImagePlaneData> MIPs; // Only one entry for non mip-mapped images
 };
