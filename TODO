@@ -12,7 +12,6 @@ OCIO
 [ ] Selective Float/Half/int16/int8 precision
 [ ] Alpha checking
 
-[ ] Display info about storage and compression
 [ ] Display metadata
 
 [ ] Add Help
