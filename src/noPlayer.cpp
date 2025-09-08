@@ -494,7 +494,7 @@ void NoPlayer::draw()
 				{
 					min_value = pixel_min[channelSoloing-1];
 					max_value = pixel_max[channelSoloing-1];
-					std::cout << planeData.buffer.spec().format << " " << min_value << " ... " << max_value << std::endl;
+					// std::cout << planeData.buffer.spec().format << " " << min_value << " ... " << max_value << std::endl;
 				}
 				else
 				{
@@ -503,7 +503,7 @@ void NoPlayer::draw()
 						min_value = std::min(min_value, pixel_min[i]);
 						max_value = std::max(max_value, pixel_max[i]);
 					}
-					std::cout << planeData.buffer.spec().format << " " << min_value << " ... " << max_value << std::endl;
+					// std::cout << planeData.buffer.spec().format << " " << min_value << " ... " << max_value << std::endl;
 				}
 				float d = (max_value - min_value);
 				if (d>0.00001)
