@@ -1,7 +1,8 @@
 Color Correction
-    [ ] auto find range
+    [x] auto find range
 
 [ ] Inspect Values from Texture Data
+    [x] From cache
 
 OCIO
     [ ] OCIO config selector
@@ -22,6 +23,7 @@ OCIO
     List of shortcuts:
     ` 1 2 3 4 (top row) RGB/R/G/B/A
     0 - =     (top row) Exposure Reset/EV-/EV+
+    R         Adjust Gain and Offset to fit Range
     [         Next AOV
     ]         Previous AOV
     PgUp PgDn Next/Previous MIP

@@ -162,7 +162,11 @@ NoPlayer::NoPlayer()
 	createShaders();
 
 	std::thread(&NoPlayer::loader, this).detach();
-	std::thread(&NoPlayer::loader, this).detach();
+
+	using namespace OIIO;
+	cache = ImageCache::create ();
+	cache->attribute ("max_memory_MB", 8000.0f);
+	cache->attribute ("autotile", 64);
 };
 
 
@@ -204,7 +208,7 @@ NoPlayer::~NoPlayer()
 	glfwTerminate();
 }
 
-
+// Helper process, loading data from queue
 void NoPlayer::loader()
 {
 	while (true)
@@ -221,13 +225,16 @@ void NoPlayer::loader()
 
 			if (plane->pixels == nullptr)
 				plane->load();
+
+			mtx.lock();
+			textureQueue.push(plane);
+			mtx.unlock();
 		}
 		else
 		{
 			mtx.unlock();
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
-
 	}
 }
 
@@ -273,10 +280,19 @@ void NoPlayer::run()
 				}
 			}
 
-			if ( plane.ready == ImagePlaneData::LOADED)
+			// Generate texture for current imagePlane
+			// if ( plane.ready == ImagePlaneData::LOADED)
+			// {
+			// 	plane.generateGlTexture();
+			// }
+
+			// Generate texture for imagePlane from the Queue
+			if (textureQueue.size()!=0)
 			{
-				plane.generateGlTexture();
-				plane.ready = ImagePlaneData::TEXTURE_GENERATED;
+				textureQueue.front()->generateGlTexture();
+				mtx.lock();
+				textureQueue.pop();
+				mtx.unlock();
 			}
 		}
 	}
@@ -463,6 +479,41 @@ void NoPlayer::draw()
 
 		if (ImGui::IsKeyPressed(ImGuiKey_Minus))
 			plane.gainValues *= 0.5;
+
+		if (ImGui::IsKeyPressed(ImGuiKey_R))
+		{
+			if (channelSoloing <= planeData.len)
+			{
+				float pixel_min[4], pixel_max[4];
+				float min_value = FLT_MAX;
+				float max_value = FLT_MIN;
+				float t;
+				planeData.getRange(pixel_min, pixel_max);
+
+				if (channelSoloing > 0)
+				{
+					min_value = pixel_min[channelSoloing-1];
+					max_value = pixel_max[channelSoloing-1];
+					std::cout << planeData.buffer.spec().format << " " << min_value << " ... " << max_value << std::endl;
+				}
+				else
+				{
+					for (int i = 0; i < std::max(1, planeData.len-1); i++)
+					{
+						min_value = std::min(min_value, pixel_min[i]);
+						max_value = std::max(max_value, pixel_max[i]);
+					}
+					std::cout << planeData.buffer.spec().format << " " << min_value << " ... " << max_value << std::endl;
+				}
+				float d = (max_value - min_value);
+				if (d>0.00001)
+				{
+					t = 1.f/(max_value - min_value);
+					plane.gainValues = t;
+					plane.offsetValues = -min_value * t;
+				}
+			}
+		}
 
 		if (ImGui::IsKeyPressed(ImGuiKey_I))
 			inspect = !inspect;
@@ -709,16 +760,25 @@ void NoPlayer::draw()
 
 			ImGui::Begin( "Inspect", nullptr, windowFlags);
 
-			int idx = (int(coords.x) + int(coords.y)*planeData.imageWidth)*planeData.len;
+			int x, y;
+			x = (int)(coords.x);
+			y = (int)(coords.y);
 
 			if(!planeData.windowMatchData)
+			{
+				x = (int)(coords.x + planeData.imageOffsetX - planeData.windowOffsetX);
+				y = (int)(coords.y + planeData.imageOffsetY - planeData.windowOffsetY);
 				ImGui::Text("(%d, %d)", (int)(coords.x + planeData.imageOffsetX - planeData.windowOffsetX),
 										(int)(coords.y + planeData.imageOffsetY - planeData.windowOffsetY));
+			}
 			ImGui::Text("(%d, %d)", (int)(coords.x), (int)(coords.y));
 
 			if (planeData.ready >= ImagePlaneData::LOADED)
+			{
 				for (int i=0; i<planeData.len; i++)
-					ImGui::Text("%s %g",  planeData.channels.substr(i, 1).c_str(), float(planeData.pixels[idx+i]));
+					ImGui::Text("%s %g",  planeData.channels.substr(i, 1).c_str(),  planeData.buffer.getchannel(x, y, 0, planeData.begin+i));
+			}
+
 			ImGui::End();
 			ImGui::PopStyleColor();
 			ImGui::PopStyleVar();
@@ -759,6 +819,7 @@ void NoPlayer::draw()
 
 		glUniform1f(glGetUniformLocation(shader, "flash"), flash);
 
+		glDisable(GL_BLEND);
 		glDisable(GL_DEPTH_TEST); // prevents framebuffer rectangle from being discarded
 		glBindTexture(GL_TEXTURE_2D, planeData.glTexture);
 		glBindVertexArray(VAO);
@@ -767,6 +828,8 @@ void NoPlayer::draw()
 
 	if (!planeData.windowMatchData || channelSoloing > planeData.len)
 	{
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 		glUseProgram(frameShader);
 		glUniform2f(glGetUniformLocation(frameShader, "offset"), (offsetX - shift.x)/(float)displayW,
 																-(offsetY - shift.y)/(float)displayH);
