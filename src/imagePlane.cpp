@@ -1,7 +1,8 @@
 
 #include "imagePlane.h"
 #include <OpenImageIO/imagebuf.h>
-#include <OpenImageIO/imagebufAlgo.h>
+#include <OpenImageIO/imagebufalgo.h>
+#include <float.h>
 
 void ImagePlaneData::load()
 {
