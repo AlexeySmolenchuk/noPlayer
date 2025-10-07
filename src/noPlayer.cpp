@@ -1,4 +1,5 @@
 #include "noPlayer.h"
+#include <imgui.h>
 
 void dropCallback(GLFWwindow* window, int count, const char** paths)
 {
@@ -325,6 +326,10 @@ void NoPlayer::draw()
 	ImGuiIO& io = ImGui::GetIO();
 	ImGui::NewFrame();
 	float unit = ImGui::GetFontSize() * 0.5;
+
+	static bool help = 0;
+	help = ImGui::IsKeyDown(ImGuiKey_F1);
+	
 	if (imagePlanes.size() == 0)
 	{
 		{
@@ -547,7 +552,43 @@ void NoPlayer::draw()
 			setChannelSoloing(4);
 	}
 
-	if (ui)
+	if (help)
+	{
+
+			static const char* helpMsg = 
+				"              Shortcuts:\n\n"
+				"` 1 2 3 4     (top row) RGB / R / G / B / A\n\n"
+				"0 - =         (top row) Exposure Reset / EV- / EV+\n\n"
+				"R             Adjust Gain and Offset to fit Range\n\n"
+				"[             Next AOV\n\n"
+				"]             Previous AOV\n\n"
+				"PgUp          Next MIP\n\n"
+				"PgDn          Previous MIP\n\n"
+				"F             Fit / 100%%\n\n"
+				"I             Inspect Tool\n\n"
+				"F5            Reload image\n\n"
+				"F11           Fullscreen\n\n"
+				"H             Hide UI\n\n"
+				"+ -           (numpad) ZoomIn / ZoomOut\n\n"
+				"Esc           Exit\n\n";
+
+			ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(helpMsg))/2.f);
+
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75, 0.75, 0.75, 1));
+			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.08f, 0.75f));
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+
+			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
+										| ImGuiWindowFlags_AlwaysAutoResize;
+
+			ImGui::Begin( "Help", nullptr, windowFlags);
+			ImGui::Text(helpMsg);
+			ImGui::End();
+
+			ImGui::PopStyleColor(2);
+			ImGui::PopStyleVar();
+	}
+	else if (ui)
 	{
 		ImGui::SetNextWindowPos(ImVec2(unit, unit));
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration

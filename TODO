@@ -21,6 +21,7 @@ OCIO
 
 
     List of shortcuts:
+    F1        Help
     ` 1 2 3 4 (top row) RGB/R/G/B/A
     0 - =     (top row) Exposure Reset/EV-/EV+
     R         Adjust Gain and Offset to fit Range
@@ -29,8 +30,8 @@ OCIO
     PgUp PgDn Next/Previous MIP
     F         Fit/100%
     I         Inspect Tool
-    F11       Fullscreen
     F5        Reload image
+    F11       Fullscreen
     H         Hide UI
     + -       (numpad) ZoomIn/ZoomOut
     Esc       Exit
