@@ -3,6 +3,8 @@
 #include <vector>
 #include <GL/glew.h>
 #include <OpenImageIO/imageio.h>
+#include <OpenImageIO/imagebuf.h>
+#include <OpenImageIO/imagecache.h>
 
 // #define PRECISION_FLOAT
 
@@ -23,70 +25,72 @@
 // Represent image data and properties of certain level of MIP
 struct ImagePlaneData
 {
-    void load();
-    void generateGlTexture();
+	void load();
+	void generateGlTexture();
+	void getRange(float*, float*);
 
-    std::string imageFileName;
-    unsigned int subimage;	// index for async loading
-    unsigned int mip;		// index for async loading
+	std::string imageFileName;
+	unsigned int subimage;	// index for async loading
+	unsigned int mip;		// index for async loading
 
-    std::string name;		// name of sub-image from metadata
-    std::string groupName;	// group name if exists
-    std::string channels;	// channels names after dot concatenated for corresponding group
-    std::string format;		// string representation of data type
+	std::string name;		// name of sub-image from metadata
+	std::string groupName;	// group name if exists
+	std::string channels;	// channels names after dot concatenated for corresponding group
+	std::string format;		// string representation of data type
 
-    std::string compression;
-    int quality;
-    int tile_width;
-    int tile_height;
+	std::string compression;
+	int quality;
+	int tile_width;
+	int tile_height;
 
-    // Data Window
-    unsigned int imageWidth;
-    unsigned int imageHeight;
-    int imageOffsetX;
-    int imageOffsetY;
+	// Data Window
+	unsigned int imageWidth;
+	unsigned int imageHeight;
+	int imageOffsetX;
+	int imageOffsetY;
 
-    // Display Window
-    unsigned int windowWidth;
-    unsigned int windowHeight;
-    int windowOffsetX;
-    int windowOffsetY;
+	// Display Window
+	unsigned int windowWidth;
+	unsigned int windowHeight;
+	int windowOffsetX;
+	int windowOffsetY;
 
-    bool windowMatchData; // is Data Window match Display Window
-    float pixelAspect;
+	bool windowMatchData; // is Data Window match Display Window
+	float pixelAspect;
 
-    int begin; // index in oiio spec
-    int len;
-    precision *pixels;	// fill deferred
-    GLuint glTexture;	// fill deferred
+	int begin; // index in oiio spec
+	int len;
+	precision *pixels;	// fill deferred
+	GLuint glTexture;	// fill deferred
 
-    enum state
-    {
-        NOT_ISSUED,
-        ISSUED,
-        LOADING_STARTED,
-        LOADED,
-        TEXTURE_GENERATED,
-    };
+	enum state
+	{
+		NOT_ISSUED,
+		ISSUED,
+		LOADING_STARTED,
+		LOADED,
+		TEXTURE_GENERATED,
+	};
 
-    state ready = NOT_ISSUED;
+	state ready = NOT_ISSUED;
 
-    ~ImagePlaneData() { delete[] pixels;}
+	OIIO::ImageBuf buffer;
+	std::shared_ptr<OIIO::ImageCache> cache;
 };
 
 
 // Represent individual channel 'group' within multichannel or multipart image 
 struct ImagePlane
 {
-    std::string name;		// name of sub-image from metadata
-    std::string groupName;	// group name if exists
-    std::string channels;	// channels names after dot concatenated for corresponding group
-    int nMIPs;
+	std::string name;		// name of sub-image from metadata
+	std::string groupName;	// group name if exists
+	std::string channels;	// channels names after dot concatenated for corresponding group
+	int nMIPs;
 
-    float gainValues = 1.0;
-    float offsetValues = 0.0;
-    bool doOCIO = false;    // guess from data type and channel naming
-    bool checkNaN = true;
+	float gainValues = 1.0;
+	float offsetValues = 0.0;
+	bool doOCIO = false;    // guess from data type and channel naming
+	bool checkNaN = true;
 
-    std::vector<ImagePlaneData> MIPs; // Only one entry for non mip-mapped images
+	std::vector<ImagePlaneData> MIPs; // Only one entry for non mip-mapped images
 };

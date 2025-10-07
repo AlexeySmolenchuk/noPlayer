@@ -1,4 +1,5 @@
 #include "noPlayer.h"
+#include <imgui.h>
 
 void dropCallback(GLFWwindow* window, int count, const char** paths)
 {
@@ -93,6 +94,18 @@ void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int 
 		}
 	}
 
+	if ( glfwGetKey( mainWindow, GLFW_KEY_F5 ) == GLFW_PRESS )
+	{
+		// TODO: more elegant reload, preserving per-imageplane settings
+		NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(mainWindow));
+		std::string currentFileName = view->getFileName();
+		if (!currentFileName.empty())
+		{
+			view->clear();
+			view->init(currentFileName.c_str(), false);
+		}
+	}
+
 	if ( glfwGetKey( mainWindow, GLFW_KEY_ESCAPE ) == GLFW_PRESS )
 		glfwSetWindowShouldClose(mainWindow, GL_TRUE);
 }
@@ -100,9 +113,6 @@ void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int 
 
 NoPlayer::NoPlayer()
 {
-
-	// glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);
-
 	if (!glfwInit())
 	{
 		std::cout << "GLFW initialisation failed!\n";
@@ -162,24 +172,31 @@ NoPlayer::NoPlayer()
 	createShaders();
 
 	std::thread(&NoPlayer::loader, this).detach();
-	std::thread(&NoPlayer::loader, this).detach();
+
+	using namespace OIIO;
+	cache = ImageCache::create ();
+	cache->attribute ("max_memory_MB", 8000.0f);
+	cache->attribute ("autotile", 64);
 };
 
 
 void
-NoPlayer::init(const char* fileName)
+NoPlayer::init(const char* fileName, bool fresh)
 {
 	imageFileName = fileName;
 	if (!scanImageFile())
 		return;
 
-	scale = 1.f;
-	// With this little offset we can align image and screen pixels for even and odd resolutions
-	offsetX = 0.25f; // Offset of viewed image
-	offsetY = 0.25f; // Offset of viewed image
-	channelSoloing = 0;
-	activePlaneIdx = 0;
-	activeMIP = 0;
+	if (fresh)
+	{
+		scale = 1.f;
+		// With this little offset we can align image and screen pixels for even and odd resolutions
+		offsetX = 0.25f; // Offset of viewed image
+		offsetY = 0.25f; // Offset of viewed image
+		channelSoloing = 0;
+		activePlaneIdx = 0;
+		activeMIP = 0;
+	}
 
 	// Preload
 	std::unique_lock<std::mutex> lock(mtx);
@@ -204,7 +221,7 @@ NoPlayer::~NoPlayer()
 	glfwTerminate();
 }
 
-
+// Helper process, loading data from queue
 void NoPlayer::loader()
 {
 	while (true)
@@ -221,13 +238,16 @@ void NoPlayer::loader()
 
 			if (plane->pixels == nullptr)
 				plane->load();
+
+			mtx.lock();
+			textureQueue.push(plane);
+			mtx.unlock();
 		}
 		else
 		{
 			mtx.unlock();
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
-
 	}
 }
 
@@ -273,10 +293,19 @@ void NoPlayer::run()
 				}
 			}
 
-			if ( plane.ready == ImagePlaneData::LOADED)
+			// Generate texture for current imagePlane
+			// if ( plane.ready == ImagePlaneData::LOADED)
+			// {
+			// 	plane.generateGlTexture();
+			// }
+
+			// Generate texture for imagePlane from the Queue
+			if (textureQueue.size()!=0)
 			{
-				plane.generateGlTexture();
-				plane.ready = ImagePlaneData::TEXTURE_GENERATED;
+				textureQueue.front()->generateGlTexture();
+				mtx.lock();
+				textureQueue.pop();
+				mtx.unlock();
 			}
 		}
 	}
@@ -296,11 +325,15 @@ void NoPlayer::draw()
 
 	ImGuiIO& io = ImGui::GetIO();
 	ImGui::NewFrame();
+	float unit = ImGui::GetFontSize() * 0.5;
 
+	static bool help = 0;
+	help = ImGui::IsKeyDown(ImGuiKey_F1);
+	
 	if (imagePlanes.size() == 0)
 	{
 		{
-			ImGui::SetNextWindowPos(ImVec2(10, 10));
+			ImGui::SetNextWindowPos(ImVec2(unit, unit));
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 										| ImGuiWindowFlags_AlwaysAutoResize
 										| ImGuiWindowFlags_NoBackground;
@@ -464,6 +497,42 @@ void NoPlayer::draw()
 		if (ImGui::IsKeyPressed(ImGuiKey_Minus))
 			plane.gainValues *= 0.5;
 
+		if (ImGui::IsKeyPressed(ImGuiKey_R))
+		{
+			if (channelSoloing <= planeData.len)
+			{
+				float pixel_min[4], pixel_max[4];
+				float min_value = FLT_MAX;
+				float max_value = FLT_MIN;
+				float t;
+				// TODO: schedule image stats upfront asynchronously 
+				planeData.getRange(pixel_min, pixel_max);
+
+				if (channelSoloing > 0)
+				{
+					min_value = pixel_min[channelSoloing-1];
+					max_value = pixel_max[channelSoloing-1];
+					// std::cout << planeData.buffer.spec().format << " " << min_value << " ... " << max_value << std::endl;
+				}
+				else
+				{
+					for (int i = 0; i < std::max(1, planeData.len-1); i++)
+					{
+						min_value = std::min(min_value, pixel_min[i]);
+						max_value = std::max(max_value, pixel_max[i]);
+					}
+					// std::cout << planeData.buffer.spec().format << " " << min_value << " ... " << max_value << std::endl;
+				}
+				float d = (max_value - min_value);
+				if (d>0.00001)
+				{
+					t = 1.f/(max_value - min_value);
+					plane.gainValues = t;
+					plane.offsetValues = -min_value * t;
+				}
+			}
+		}
+
 		if (ImGui::IsKeyPressed(ImGuiKey_I))
 			inspect = !inspect;
 
@@ -483,9 +552,45 @@ void NoPlayer::draw()
 			setChannelSoloing(4);
 	}
 
-	if (ui)
+	if (help)
 	{
-		ImGui::SetNextWindowPos(ImVec2(10, 10));
+
+			static const char* helpMsg = 
+				"              Shortcuts:\n\n"
+				"` 1 2 3 4     (top row) RGB / R / G / B / A\n\n"
+				"0 - =         (top row) Exposure Reset / EV- / EV+\n\n"
+				"R             Adjust Gain and Offset to fit Range\n\n"
+				"[             Next AOV\n\n"
+				"]             Previous AOV\n\n"
+				"PgUp          Next MIP\n\n"
+				"PgDn          Previous MIP\n\n"
+				"F             Fit / 100%%\n\n"
+				"I             Inspect Tool\n\n"
+				"F5            Reload image\n\n"
+				"F11           Fullscreen\n\n"
+				"H             Hide UI\n\n"
+				"+ -           (numpad) ZoomIn / ZoomOut\n\n"
+				"Esc           Exit\n\n";
+
+			ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(helpMsg))/2.f);
+
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75, 0.75, 0.75, 1));
+			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.08f, 0.75f));
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+
+			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
+										| ImGuiWindowFlags_AlwaysAutoResize;
+
+			ImGui::Begin( "Help", nullptr, windowFlags);
+			ImGui::Text(helpMsg);
+			ImGui::End();
+
+			ImGui::PopStyleColor(2);
+			ImGui::PopStyleVar();
+	}
+	else if (ui)
+	{
+		ImGui::SetNextWindowPos(ImVec2(unit, unit));
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 									| ImGuiWindowFlags_AlwaysAutoResize
 									| ImGuiWindowFlags_NoBackground;
@@ -559,8 +664,8 @@ void NoPlayer::draw()
 		ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(1.0, 1.0, 1.0, 0.1));
 		ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(1.0, 1.0, 1.0, 0.0));
 
-		ImGui::SetNextWindowPos(ImVec2(10, 100));
-		ImGui::SetNextWindowSizeConstraints(ImVec2(-1, 0), ImVec2(-1, displayH - 120));
+		ImGui::SetNextWindowPos(ImVec2(unit, unit*14));
+		ImGui::SetNextWindowSizeConstraints(ImVec2(-1, 0), ImVec2(-1, displayH - 19*unit));
 
 		windowFlags = ImGuiWindowFlags_None
 					| ImGuiWindowFlags_NoDecoration
@@ -644,8 +749,8 @@ void NoPlayer::draw()
 										| ImGuiWindowFlags_NoBackground
 										;
 
-			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 220, displayH - 35));
-			ImGui::SetNextWindowSize(ImVec2(150, 0));
+			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 34*unit, displayH - 5*unit));
+			ImGui::SetNextWindowSize(ImVec2(23*unit, 0));
 
 			ImGui::Begin( "Gain", nullptr, windowFlags);
 			plane.gainValues = std::clamp( plane.gainValues, -100000.f, 100000.f);
@@ -653,16 +758,16 @@ void NoPlayer::draw()
 			ImGui::End();
 
 
-			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 70, displayH - 35));
-			ImGui::SetNextWindowSize(ImVec2(150, 0));
+			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 10*unit, displayH - 5*unit));
+			ImGui::SetNextWindowSize(ImVec2(23*unit, 0));
 
 			ImGui::Begin( "Offset", nullptr, windowFlags);
 			plane.offsetValues = std::clamp( plane.offsetValues, -100000.f, 100000.f);
 			ImGui::DragFloat("Offset", &(plane.offsetValues), std::fmax(0.0001f, std::fabs(plane.offsetValues)*0.01f), 0, 0, "%g");
 			ImGui::End();
 
-			ImGui::SetNextWindowPos(ImVec2(displayW/2 + 90, displayH - 35));
-			ImGui::SetNextWindowSize(ImVec2(150, 0));
+			ImGui::SetNextWindowPos(ImVec2(displayW/2 + 14*unit, displayH - 5*unit));
+			ImGui::SetNextWindowSize(ImVec2(23*unit, 0));
 
 			ImGui::Begin( "OCIO", nullptr, windowFlags);
 			ImGui::Checkbox("OCIO", &(plane.doOCIO));
@@ -702,23 +807,32 @@ void NoPlayer::draw()
 			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.4f));
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
-			ImGui::SetNextWindowPos(mousePos + ImVec2((mousePos.x + 128) > displayW ? -100.f : 16.f,
-													  (mousePos.y + 128) > displayH ? -96.f : 24.f));
+			ImGui::SetNextWindowPos(mousePos + ImVec2((mousePos.x + 20*unit) > displayW ? -15*unit : 3*unit,
+													  (mousePos.y + 20*unit) > displayH ? -15*unit : 4*unit));
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 										| ImGuiWindowFlags_AlwaysAutoResize;
 
 			ImGui::Begin( "Inspect", nullptr, windowFlags);
 
-			int idx = (int(coords.x) + int(coords.y)*planeData.imageWidth)*planeData.len;
+			int x, y;
+			x = (int)(coords.x);
+			y = (int)(coords.y);
 
 			if(!planeData.windowMatchData)
+			{
+				x = (int)(coords.x + planeData.imageOffsetX - planeData.windowOffsetX);
+				y = (int)(coords.y + planeData.imageOffsetY - planeData.windowOffsetY);
 				ImGui::Text("(%d, %d)", (int)(coords.x + planeData.imageOffsetX - planeData.windowOffsetX),
 										(int)(coords.y + planeData.imageOffsetY - planeData.windowOffsetY));
+			}
 			ImGui::Text("(%d, %d)", (int)(coords.x), (int)(coords.y));
 
 			if (planeData.ready >= ImagePlaneData::LOADED)
+			{
 				for (int i=0; i<planeData.len; i++)
-					ImGui::Text("%s %g",  planeData.channels.substr(i, 1).c_str(), float(planeData.pixels[idx+i]));
+					ImGui::Text("%s %g",  planeData.channels.substr(i, 1).c_str(),  planeData.buffer.getchannel(x, y, 0, planeData.begin+i));
+			}
+
 			ImGui::End();
 			ImGui::PopStyleColor();
 			ImGui::PopStyleVar();
@@ -759,6 +873,7 @@ void NoPlayer::draw()
 
 		glUniform1f(glGetUniformLocation(shader, "flash"), flash);
 
+		glDisable(GL_BLEND);
 		glDisable(GL_DEPTH_TEST); // prevents framebuffer rectangle from being discarded
 		glBindTexture(GL_TEXTURE_2D, planeData.glTexture);
 		glBindVertexArray(VAO);
@@ -767,6 +882,8 @@ void NoPlayer::draw()
 
 	if (!planeData.windowMatchData || channelSoloing > planeData.len)
 	{
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 		glUseProgram(frameShader);
 		glUniform2f(glGetUniformLocation(frameShader, "offset"), (offsetX - shift.x)/(float)displayW,
 																-(offsetY - shift.y)/(float)displayH);

@@ -145,6 +145,7 @@ bool NoPlayer::scanImageFile()
 				plane.quality = spec.decode_compression_metadata().second;
 				plane.tile_width = spec.tile_width;
 				plane.tile_height = spec.tile_height;
+				plane.cache = cache;
 			}
 			mip++;
 			mips++;
