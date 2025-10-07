@@ -24,11 +24,12 @@ public:
 	NoPlayer();
 	~NoPlayer();
 
-	void init(const char* fileName);
+	void init(const char* fileName, bool fresh = true);
 	void run();
 	void draw();
 	void setChannelSoloing(int idx) {channelSoloing = idx;}
 	void clear() { imagePlanes.clear();}
+	std::string getFileName() {return imageFileName;}
 
 private:
 	bool scanImageFile();

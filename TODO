@@ -3,7 +3,7 @@ Color Correction
 
 [ ] Inspect Values from Texture Data
     [x] From cache
-
+    [ ] Schedule image stats upfront asynchronously
 OCIO
     [ ] OCIO config selector
     [ ] OCIO transform selector
@@ -30,6 +30,7 @@ OCIO
     F         Fit/100%
     I         Inspect Tool
     F11       Fullscreen
+    F5        Reload image
     H         Hide UI
     + -       (numpad) ZoomIn/ZoomOut
     Esc       Exit

@@ -93,6 +93,18 @@ void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int 
 		}
 	}
 
+	if ( glfwGetKey( mainWindow, GLFW_KEY_F5 ) == GLFW_PRESS )
+	{
+		// TODO: more elegant reload, preserving per-imageplane settings
+		NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(mainWindow));
+		std::string currentFileName = view->getFileName();
+		if (!currentFileName.empty())
+		{
+			view->clear();
+			view->init(currentFileName.c_str(), false);
+		}
+	}
+
 	if ( glfwGetKey( mainWindow, GLFW_KEY_ESCAPE ) == GLFW_PRESS )
 		glfwSetWindowShouldClose(mainWindow, GL_TRUE);
 }
@@ -100,9 +112,6 @@ void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int 
 
 NoPlayer::NoPlayer()
 {
-
-	// glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);
-
 	if (!glfwInit())
 	{
 		std::cout << "GLFW initialisation failed!\n";
@@ -171,19 +180,22 @@ NoPlayer::NoPlayer()
 
 
 void
-NoPlayer::init(const char* fileName)
+NoPlayer::init(const char* fileName, bool fresh)
 {
 	imageFileName = fileName;
 	if (!scanImageFile())
 		return;
 
-	scale = 1.f;
-	// With this little offset we can align image and screen pixels for even and odd resolutions
-	offsetX = 0.25f; // Offset of viewed image
-	offsetY = 0.25f; // Offset of viewed image
-	channelSoloing = 0;
-	activePlaneIdx = 0;
-	activeMIP = 0;
+	if (fresh)
+	{
+		scale = 1.f;
+		// With this little offset we can align image and screen pixels for even and odd resolutions
+		offsetX = 0.25f; // Offset of viewed image
+		offsetY = 0.25f; // Offset of viewed image
+		channelSoloing = 0;
+		activePlaneIdx = 0;
+		activeMIP = 0;
+	}
 
 	// Preload
 	std::unique_lock<std::mutex> lock(mtx);
@@ -312,11 +324,11 @@ void NoPlayer::draw()
 
 	ImGuiIO& io = ImGui::GetIO();
 	ImGui::NewFrame();
-
+	float unit = ImGui::GetFontSize() * 0.5;
 	if (imagePlanes.size() == 0)
 	{
 		{
-			ImGui::SetNextWindowPos(ImVec2(10, 10));
+			ImGui::SetNextWindowPos(ImVec2(unit, unit));
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 										| ImGuiWindowFlags_AlwaysAutoResize
 										| ImGuiWindowFlags_NoBackground;
@@ -488,6 +500,7 @@ void NoPlayer::draw()
 				float min_value = FLT_MAX;
 				float max_value = FLT_MIN;
 				float t;
+				// TODO: schedule image stats upfront asynchronously 
 				planeData.getRange(pixel_min, pixel_max);
 
 				if (channelSoloing > 0)
@@ -536,7 +549,7 @@ void NoPlayer::draw()
 
 	if (ui)
 	{
-		ImGui::SetNextWindowPos(ImVec2(10, 10));
+		ImGui::SetNextWindowPos(ImVec2(unit, unit));
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 									| ImGuiWindowFlags_AlwaysAutoResize
 									| ImGuiWindowFlags_NoBackground;
@@ -610,8 +623,8 @@ void NoPlayer::draw()
 		ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(1.0, 1.0, 1.0, 0.1));
 		ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(1.0, 1.0, 1.0, 0.0));
 
-		ImGui::SetNextWindowPos(ImVec2(10, 100));
-		ImGui::SetNextWindowSizeConstraints(ImVec2(-1, 0), ImVec2(-1, displayH - 120));
+		ImGui::SetNextWindowPos(ImVec2(unit, unit*14));
+		ImGui::SetNextWindowSizeConstraints(ImVec2(-1, 0), ImVec2(-1, displayH - 19*unit));
 
 		windowFlags = ImGuiWindowFlags_None
 					| ImGuiWindowFlags_NoDecoration
@@ -695,8 +708,8 @@ void NoPlayer::draw()
 										| ImGuiWindowFlags_NoBackground
 										;
 
-			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 220, displayH - 35));
-			ImGui::SetNextWindowSize(ImVec2(150, 0));
+			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 34*unit, displayH - 5*unit));
+			ImGui::SetNextWindowSize(ImVec2(23*unit, 0));
 
 			ImGui::Begin( "Gain", nullptr, windowFlags);
 			plane.gainValues = std::clamp( plane.gainValues, -100000.f, 100000.f);
@@ -704,16 +717,16 @@ void NoPlayer::draw()
 			ImGui::End();
 
 
-			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 70, displayH - 35));
-			ImGui::SetNextWindowSize(ImVec2(150, 0));
+			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 10*unit, displayH - 5*unit));
+			ImGui::SetNextWindowSize(ImVec2(23*unit, 0));
 
 			ImGui::Begin( "Offset", nullptr, windowFlags);
 			plane.offsetValues = std::clamp( plane.offsetValues, -100000.f, 100000.f);
 			ImGui::DragFloat("Offset", &(plane.offsetValues), std::fmax(0.0001f, std::fabs(plane.offsetValues)*0.01f), 0, 0, "%g");
 			ImGui::End();
 
-			ImGui::SetNextWindowPos(ImVec2(displayW/2 + 90, displayH - 35));
-			ImGui::SetNextWindowSize(ImVec2(150, 0));
+			ImGui::SetNextWindowPos(ImVec2(displayW/2 + 14*unit, displayH - 5*unit));
+			ImGui::SetNextWindowSize(ImVec2(23*unit, 0));
 
 			ImGui::Begin( "OCIO", nullptr, windowFlags);
 			ImGui::Checkbox("OCIO", &(plane.doOCIO));
@@ -753,8 +766,8 @@ void NoPlayer::draw()
 			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.4f));
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
-			ImGui::SetNextWindowPos(mousePos + ImVec2((mousePos.x + 128) > displayW ? -100.f : 16.f,
-													  (mousePos.y + 128) > displayH ? -96.f : 24.f));
+			ImGui::SetNextWindowPos(mousePos + ImVec2((mousePos.x + 20*unit) > displayW ? -15*unit : 3*unit,
+													  (mousePos.y + 20*unit) > displayH ? -15*unit : 4*unit));
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 										| ImGuiWindowFlags_AlwaysAutoResize;
 
