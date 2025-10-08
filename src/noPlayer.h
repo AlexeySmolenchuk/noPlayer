@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <string>
+#include <queue>
 #include <thread>
 
 #include <GL/glew.h>
@@ -14,6 +15,8 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 
+#include <OpenImageIO/imagecache.h>
+
 class NoPlayer
 {
 
@@ -21,11 +24,12 @@ public:
 	NoPlayer();
 	~NoPlayer();
 
-	void init(const char* fileName);
+	void init(const char* fileName, bool fresh = true);
 	void run();
 	void draw();
 	void setChannelSoloing(int idx) {channelSoloing = idx;}
 	void clear() { imagePlanes.clear();}
+	std::string getFileName() {return imageFileName;}
 
 private:
 	bool scanImageFile();
@@ -44,6 +48,7 @@ private:
 
 	std::vector<ImagePlane> imagePlanes;
 	std::vector<ImagePlaneData*> loadingQueue;
+	std::queue<ImagePlaneData*> textureQueue;
 	std::mutex mtx;
 
 	int activePlaneIdx;
@@ -87,7 +92,8 @@ private:
 		#version 330 core
 		out vec4 FragColor;
 		void main() {
-			FragColor = vec4(0.2);
+			float dashed = (int(gl_FragCoord.x/3) + int(gl_FragCoord.y/3)) % 2;
+			FragColor = vec4(vec3(0.25), 0.75 * dashed);
 		}
 	)glsl";
 
@@ -97,4 +103,6 @@ private:
 	bool fullScreen = false;
 
 	std::string message = "";
+
+	std::shared_ptr<OpenImageIO_v3_0::ImageCache> cache;
 };

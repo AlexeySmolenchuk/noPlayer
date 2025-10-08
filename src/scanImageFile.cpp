@@ -28,14 +28,6 @@ bool NoPlayer::scanImageFile()
 			int count = 0;
 			const ImageSpec &spec = inp->spec();
 
-			// std::cout
-			// << "Compression:" << spec.decode_compression_metadata().first
-			// << " " << spec.decode_compression_metadata().second << std::endl
-			// << "tile pixels:" << spec.tile_pixels() << std::endl
-			// << "tile width:" << spec.tile_width << std::endl
-			// << "tile height:" << spec.tile_height << std::endl
-			// << std::endl;
-
 			bool windowMatchData = (spec.width == spec.full_width &&
 									spec.height == spec.full_height &&
 									spec.x == spec.full_x &&
@@ -146,8 +138,14 @@ bool NoPlayer::scanImageFile()
 					imagePlanesFlattened.back().channels += name.substr(pos+1);
 				}
 
-				imagePlanesFlattened.back().windowMatchData = windowMatchData;
-				imagePlanesFlattened.back().pixelAspect = spec.get_float_attribute("PixelAspectRatio", 1.0);
+				ImagePlaneData &plane = imagePlanesFlattened.back();
+				plane.windowMatchData = windowMatchData;
+				plane.pixelAspect = spec.get_float_attribute("PixelAspectRatio", 1.0);
+				plane.compression = spec.decode_compression_metadata().first;
+				plane.quality = spec.decode_compression_metadata().second;
+				plane.tile_width = spec.tile_width;
+				plane.tile_height = spec.tile_height;
+				plane.cache = cache;
 			}
 			mip++;
 			mips++;
