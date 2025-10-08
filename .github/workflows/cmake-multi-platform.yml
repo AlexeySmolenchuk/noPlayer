@@ -57,7 +57,7 @@ jobs:
         echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
 
     - name: Install dependencies
-      if: matrix.os != windows-latest
+      if: matrix.os != 'windows-latest'
       run: |
         sudo apt-get install libxmu-dev libxi-dev libgl-dev
 
