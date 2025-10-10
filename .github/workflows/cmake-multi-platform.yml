@@ -59,7 +59,7 @@ jobs:
     - name: Install dependencies
       if: matrix.os != 'windows-latest'
       run: |
-        sudo apt-get install libxmu-dev libxi-dev libgl-dev
+        sudo apt-get install libxmu-dev libxi-dev libgl-dev libxrandr-dev xinerama xcursor xorg libglu1-mesa pkg-config
 
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
