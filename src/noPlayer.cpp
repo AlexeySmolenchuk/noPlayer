@@ -814,18 +814,24 @@ void NoPlayer::draw()
 
 			ImGui::Begin( "Inspect", nullptr, windowFlags);
 
+			// TODO: Fix rounding
+			// The pixel pointer is little off when Pixel Aspect !=1.0
 			int x, y;
-			x = (int)(coords.x);
-			y = (int)(coords.y);
+			x = (int)(coords.x + planeData.imageOffsetX);
+			y = (int)(coords.y + planeData.imageOffsetY);
 
-			if(!planeData.windowMatchData)
+			if(planeData.windowMatchData)
 			{
-				x = (int)(coords.x + planeData.imageOffsetX - planeData.windowOffsetX);
-				y = (int)(coords.y + planeData.imageOffsetY - planeData.windowOffsetY);
-				ImGui::Text("(%d, %d)", (int)(coords.x + planeData.imageOffsetX - planeData.windowOffsetX),
-										(int)(coords.y + planeData.imageOffsetY - planeData.windowOffsetY));
+				ImGui::Text("(%d, %d)", x, y);
 			}
-			ImGui::Text("(%d, %d)", (int)(coords.x), (int)(coords.y));
+			else
+			{
+				// Results are not intuitive when Display Window offset applied
+				// Coordinates in Display window are used to access pixel values in OpenImageIO
+				ImGui::Text("Display: (%d, %d)", x, y);
+				ImGui::Text("Data:    (%d, %d)", (int)(coords.x - planeData.windowOffsetX),
+										(int)(coords.y - planeData.windowOffsetY));
+			}
 
 			if (planeData.ready >= ImagePlaneData::LOADED)
 			{
