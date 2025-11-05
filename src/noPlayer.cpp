@@ -1,5 +1,6 @@
 #include "noPlayer.h"
 #include <imgui.h>
+#include <imgui_impl_glfw.h>
 
 void dropCallback(GLFWwindow* window, int count, const char** paths)
 {
@@ -256,8 +257,14 @@ void NoPlayer::run()
 {
 	while (!glfwWindowShouldClose(mainWindow))
 	{
-		glfwPollEvents();
-		draw();
+		if (glfwGetWindowAttrib(mainWindow, GLFW_VISIBLE))
+		{
+			GLFWmonitor* monitor = getCurrentMonitor(mainWindow);
+			if (monitor)
+				ImGui::GetIO().FontGlobalScale = ImGui_ImplGlfw_GetContentScaleForMonitor(monitor);
+			glfwPollEvents();
+			draw();
+		}
 
 		if (imagePlanes.size())
 		{
@@ -353,8 +360,9 @@ void NoPlayer::draw()
 			const char* dropImageMsg = "Drop image";
 			ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(dropImageMsg))/2.f);
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
-										| ImGuiWindowFlags_NoBackground;
-			ImGui::Begin( "Hello", nullptr, windowFlags);
+										| ImGuiWindowFlags_NoBackground
+										| ImGuiWindowFlags_AlwaysAutoResize;
+			ImGui::Begin( "Drop image", nullptr, windowFlags);
 			ImGui::Text(dropImageMsg);
 			ImGui::End();
 		}
@@ -784,7 +792,8 @@ void NoPlayer::draw()
 		const char* message = "Loading...";
 		ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2.f);
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
-									| ImGuiWindowFlags_NoBackground;
+									| ImGuiWindowFlags_NoBackground
+									| ImGuiWindowFlags_AlwaysAutoResize;
 		ImGui::Begin( "Loading", nullptr, windowFlags);
 		ImGui::Text(message);
 		ImGui::End();
