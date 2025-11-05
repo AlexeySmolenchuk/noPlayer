@@ -544,7 +544,7 @@ void NoPlayer::draw()
 				{
 					t = 1.f/(max_value - min_value);
 					plane.gainValues = t;
-					plane.offsetValues = -min_value * t;
+					plane.offsetValues = -min_value;
 				}
 			}
 		}
