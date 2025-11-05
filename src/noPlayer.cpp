@@ -1,6 +1,8 @@
 #include "noPlayer.h"
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
+#include <OpenImageIO/imageio.h>
+#include <OpenEXR/OpenEXRConfig.h>
 
 void dropCallback(GLFWwindow* window, int count, const char** paths)
 {
@@ -351,6 +353,12 @@ void NoPlayer::draw()
 			ImGui::Text((const char *)glGetString(GL_VENDOR));
 			ImGui::Text((const char *)glGetString(GL_RENDERER));
 			ImGui::Text((const char *)glGetString(GL_VERSION));
+			ImGui::Text("");
+
+			// This is OK only for static linking
+			ImGui::Text("OpenImageIO " OIIO_VERSION_STRING);
+			ImGui::Text(OPENEXR_PACKAGE_STRING);
+
 			ImGui::Text(message.c_str());
 			ImGui::PopStyleColor();
 			ImGui::End();
