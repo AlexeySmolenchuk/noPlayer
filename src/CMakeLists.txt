@@ -20,7 +20,6 @@ add_executable(noPlayer
     ${PROJECT_SOURCE_DIR}/imgui/imgui_draw.cpp
     ${PROJECT_SOURCE_DIR}/imgui/backends/imgui_impl_opengl3.cpp
     ${PROJECT_SOURCE_DIR}/imgui/backends/imgui_impl_glfw.cpp
-    ${PROJECT_SOURCE_DIR}/imgui/backends/imgui_impl_win32.cpp
     )
 
 target_include_directories(noPlayer PRIVATE
