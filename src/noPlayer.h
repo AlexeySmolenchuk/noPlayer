@@ -102,5 +102,5 @@ private:
 
 	std::string message = "";
 
-	std::shared_ptr<OpenImageIO_v3_0::ImageCache> cache;
+	std::shared_ptr<OIIO::ImageCache> cache;
 };

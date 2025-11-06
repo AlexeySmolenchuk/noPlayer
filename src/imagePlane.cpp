@@ -24,9 +24,7 @@ void ImagePlaneData::load()
 		return;
 	}
 
-	pixels = new precision[ imageWidth
-							* imageHeight
-							* len];
+	pixels = std::shared_ptr<precision[]>(new precision[imageWidth * imageHeight * len]);
 
 	buffer = ImageBuf(imageFileName, subimage, mip, cache);
 
@@ -42,7 +40,7 @@ void ImagePlaneData::load()
 	ROI roi = buffer.spec().roi();
 	roi.chbegin = begin;
 	roi.chend = begin + len;
-
+	
 	bool ok = buffer.get_pixels(roi, TypeDesc::PRECISION, &pixels[0]);
 	if (!ok)
 		std::cout << buffer.geterror() << std::endl;
@@ -137,8 +135,6 @@ void ImagePlaneData::generateGlTexture()
 					dataFormats[len], PRECISION_GL,
 					&pixels[0]);
 
-	// std::cout << glGetError() << std::endl;
-	delete[] pixels;
-	
+	// std::cout << glGetError() << std::endl;	
 	ready = TEXTURE_GENERATED;
 }
