@@ -60,7 +60,7 @@ struct ImagePlaneData
 
 	int begin; // index in oiio spec
 	int len;
-	precision *pixels;	// fill deferred
+	std::shared_ptr<precision[]> pixels;	// fill deferred
 	GLuint glTexture;	// fill deferred
 
 	enum state

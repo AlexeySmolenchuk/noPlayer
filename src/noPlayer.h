@@ -2,10 +2,8 @@
 
 #include "imagePlane.h"
 
-#include <iostream>
 #include <string>
 #include <queue>
-#include <thread>
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -104,5 +102,5 @@ private:
 
 	std::string message = "";
 
-	std::shared_ptr<OpenImageIO_v3_0::ImageCache> cache;
+	std::shared_ptr<OIIO::ImageCache> cache;
 };

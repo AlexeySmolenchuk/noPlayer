@@ -1,5 +1,8 @@
 #include "noPlayer.h"
 #include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <OpenImageIO/imageio.h>
+#include <OpenEXR/OpenEXRConfig.h>
 
 void dropCallback(GLFWwindow* window, int count, const char** paths)
 {
@@ -256,8 +259,14 @@ void NoPlayer::run()
 {
 	while (!glfwWindowShouldClose(mainWindow))
 	{
-		glfwPollEvents();
-		draw();
+		if (glfwGetWindowAttrib(mainWindow, GLFW_VISIBLE))
+		{
+			GLFWmonitor* monitor = getCurrentMonitor(mainWindow);
+			if (monitor)
+				ImGui::GetIO().FontGlobalScale = ImGui_ImplGlfw_GetContentScaleForMonitor(monitor);
+			glfwPollEvents();
+			draw();
+		}
 
 		if (imagePlanes.size())
 		{
@@ -344,6 +353,12 @@ void NoPlayer::draw()
 			ImGui::Text((const char *)glGetString(GL_VENDOR));
 			ImGui::Text((const char *)glGetString(GL_RENDERER));
 			ImGui::Text((const char *)glGetString(GL_VERSION));
+			ImGui::Text("");
+
+			// This is OK only for static linking
+			ImGui::Text("OpenImageIO " OIIO_VERSION_STRING);
+			ImGui::Text(OPENEXR_PACKAGE_STRING);
+
 			ImGui::Text(message.c_str());
 			ImGui::PopStyleColor();
 			ImGui::End();
@@ -353,8 +368,9 @@ void NoPlayer::draw()
 			const char* dropImageMsg = "Drop image";
 			ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(dropImageMsg))/2.f);
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
-										| ImGuiWindowFlags_NoBackground;
-			ImGui::Begin( "Hello", nullptr, windowFlags);
+										| ImGuiWindowFlags_NoBackground
+										| ImGuiWindowFlags_AlwaysAutoResize;
+			ImGui::Begin( "Drop image", nullptr, windowFlags);
 			ImGui::Text(dropImageMsg);
 			ImGui::End();
 		}
@@ -528,7 +544,7 @@ void NoPlayer::draw()
 				{
 					t = 1.f/(max_value - min_value);
 					plane.gainValues = t;
-					plane.offsetValues = -min_value * t;
+					plane.offsetValues = -min_value;
 				}
 			}
 		}
@@ -784,7 +800,8 @@ void NoPlayer::draw()
 		const char* message = "Loading...";
 		ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2.f);
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
-									| ImGuiWindowFlags_NoBackground;
+									| ImGuiWindowFlags_NoBackground
+									| ImGuiWindowFlags_AlwaysAutoResize;
 		ImGui::Begin( "Loading", nullptr, windowFlags);
 		ImGui::Text(message);
 		ImGui::End();

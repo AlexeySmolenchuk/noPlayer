@@ -17,9 +17,9 @@ bool NoPlayer::scanImageFile()
 		return false;
 	}
 
-	std::vector<std::string> predefined = {"RGBA", "XYZ", "UV", "rgba", "xyz", "uv"};
+	const std::vector<std::string> predefined = {"RGBA", "XYZ", "UV", "rgba", "xyz", "uv"};
 	std::vector<ImagePlaneData> imagePlanesFlattened; // Flattened data will be organized by names after reading
-
+	
 	int mip = 0;
 	while (inp->seek_subimage(subimages, mip))
 	{
@@ -175,7 +175,7 @@ bool NoPlayer::scanImageFile()
 		if (map.find(key) == map.end())
 		{
 			map[key] = idx;
-			ImagePlane plane;
+			ImagePlane &plane = imagePlanes.emplace_back();
 			plane.name = planeData.name;
 			plane.groupName = planeData.groupName;
 			plane.channels = planeData.channels;
@@ -186,12 +186,11 @@ bool NoPlayer::scanImageFile()
 				if ((planeData.format == "half") || (planeData.format == "float"))
 					plane.doOCIO = true;
 
-			imagePlanes.push_back(plane);
 		}
 		else
 			idx = map[key];
 
-		imagePlanes[idx].MIPs.push_back(planeData);
+		imagePlanes[idx].MIPs.emplace_back(planeData);
 		imagePlanes[idx].nMIPs++;
 	}
 

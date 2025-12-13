@@ -117,8 +117,8 @@ void NoPlayer::configureOCIO()
 				}
 			}
 
-			fragment *= gainValues;
 			fragment += vec4(offsetValues);
+			fragment *= gainValues;
 
 			FragColor = fragment;
 

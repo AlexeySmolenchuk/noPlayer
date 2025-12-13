@@ -8,13 +8,6 @@
       "features": [
         "opencolorio"
       ]
-    },
-    {
-      "name": "imgui",
-      "features": [
-        "glfw-binding",
-        "opengl3-binding"
-      ]
     }
   ]
 }
