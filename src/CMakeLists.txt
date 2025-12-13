@@ -13,12 +13,22 @@ add_executable(noPlayer
     scanImageFile.cpp
     configureOCIO.cpp
     oglRoutine.cpp
+    
+    ${PROJECT_SOURCE_DIR}/imgui/imgui_widgets.cpp
+    ${PROJECT_SOURCE_DIR}/imgui/imgui_tables.cpp
+    ${PROJECT_SOURCE_DIR}/imgui/imgui.cpp
+    ${PROJECT_SOURCE_DIR}/imgui/imgui_draw.cpp
+    ${PROJECT_SOURCE_DIR}/imgui/backends/imgui_impl_opengl3.cpp
+    ${PROJECT_SOURCE_DIR}/imgui/backends/imgui_impl_glfw.cpp
     )
+
+target_include_directories(noPlayer PRIVATE
+    ${PROJECT_SOURCE_DIR}/imgui
+    ${PROJECT_SOURCE_DIR}/imgui/backends)
 
 target_link_libraries(noPlayer PRIVATE
     glfw
     GLEW::GLEW
-    imgui::imgui
     OpenImageIO::OpenImageIO
     OpenColorIO::OpenColorIO
     )
