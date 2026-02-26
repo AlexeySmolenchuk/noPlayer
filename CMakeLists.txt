@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.21)
 
 set(NOPLAYER_VCPKG_TOOLCHAIN "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake")
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND EXISTS "${NOPLAYER_VCPKG_TOOLCHAIN}")
@@ -78,6 +78,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND EXISTS "${NOPLAYER_VCPKG_TOOLCHAIN}" A
 endif()
 
 project(noPlayer VERSION 0.0.0 LANGUAGES CXX)
+
+include(GNUInstallDirs)
+
+option(
+    NOPLAYER_INSTALL_RUNTIME_DEPENDENCIES
+    "Install non-system runtime dependencies together with the noPlayer executable."
+    ON
+)
 
 find_package(GLEW CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)

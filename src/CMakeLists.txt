@@ -1,9 +1,5 @@
-if(MSVC)
-    add_compile_options(
-        $<$<CONFIG:>:/MT>
-        $<$<CONFIG:Debug>:/MTd>
-        $<$<CONFIG:Release>:/MT>
-        )
+if(MSVC AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 add_executable(noPlayer
@@ -43,4 +39,43 @@ if(MSVC)
     set_target_properties(noPlayer PROPERTIES
         LINK_FLAGS "/ENTRY:mainCRTStartup /SUBSYSTEM:WINDOWS"
         )
+endif()
+
+if(NOPLAYER_INSTALL_RUNTIME_DEPENDENCIES)
+    install(TARGETS noPlayer
+        RUNTIME_DEPENDENCY_SET noPlayer_RuntimeDependencies
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+
+    if(WIN32)
+        install(RUNTIME_DEPENDENCY_SET noPlayer_RuntimeDependencies
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+            PRE_EXCLUDE_REGEXES
+                "api-ms-win-.*"
+                "ext-ms-win-.*"
+            POST_EXCLUDE_REGEXES
+                ".*[Ww]indows[\\\\/](System32|WinSxS)[\\\\/].*"
+        )
+    elseif(UNIX AND NOT APPLE)
+        install(RUNTIME_DEPENDENCY_SET noPlayer_RuntimeDependencies
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+            POST_EXCLUDE_REGEXES
+                "^/lib.*"
+                "^/usr/lib.*"
+                ".*/ld-linux.*"
+                ".*/lib(c|m|pthread|dl|rt)\\.so.*"
+                ".*/libgcc_s\\.so.*"
+                ".*/libstdc\\+\\+\\.so.*"
+        )
+    else()
+        install(RUNTIME_DEPENDENCY_SET noPlayer_RuntimeDependencies
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
+else()
+    install(TARGETS noPlayer
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
 endif()
