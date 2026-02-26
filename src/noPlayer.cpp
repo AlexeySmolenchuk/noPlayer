@@ -9,7 +9,6 @@ void dropCallback(GLFWwindow* window, int count, const char** paths)
     // for (int i = 0;  i < count;  i++)
     //     std::cout << paths[i] << std::endl;
 
-	// TODO amend async tasks first
 	NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(window));
 	view->clear();
 	view->init(paths[0]);
@@ -174,12 +173,12 @@ NoPlayer::NoPlayer()
 	createPlane();
 	createShaders();
 
-	std::thread(&NoPlayer::loader, this).detach();
-
 	using namespace OIIO;
 	cache = ImageCache::create ();
 	cache->attribute ("max_memory_MB", 8000.0f);
 	cache->attribute ("autotile", 64);
+
+	loaderThread = std::thread(&NoPlayer::loader, this);
 };
 
 
@@ -208,15 +207,40 @@ NoPlayer::init(const char* fileName, bool fresh)
 	{
 		for(auto mip = ip->MIPs.rbegin(); mip != ip->MIPs.rend(); ++mip)
 		{
-			loadingQueue.push_back(&(*mip));
-			mip->ready = ImagePlaneData::ISSUED;
+			enqueueLoadLocked(&(*mip));
 		}
 	}
 }
 
 
+void NoPlayer::clear()
+{
+	std::unique_lock<std::mutex> lock(mtx);
+
+	// Invalidate queued work and wait until the worker is done with any in-flight load.
+	queueGeneration++;
+	loadingQueue.clear();
+	while (!textureQueue.empty())
+		textureQueue.pop();
+	queueCondition.wait(lock, [this]() { return activeLoads == 0; });
+
+	imagePlanes.clear();
+	activePlaneIdx = 0;
+	activeMIP = 0;
+}
+
+
 NoPlayer::~NoPlayer()
 {
+	{
+		std::lock_guard<std::mutex> lock(mtx);
+		loaderStop = true;
+		loadingQueue.clear();
+		queueCondition.notify_all();
+	}
+	if (loaderThread.joinable())
+		loaderThread.join();
+
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
@@ -224,32 +248,65 @@ NoPlayer::~NoPlayer()
 	glfwTerminate();
 }
 
+
+void NoPlayer::enqueueLoadLocked(ImagePlaneData* plane)
+{
+	if (plane == nullptr)
+		return;
+
+	if (plane->ready != ImagePlaneData::NOT_ISSUED)
+		return;
+
+	for (const LoadTask &task : loadingQueue)
+	{
+		if (task.generation == queueGeneration && task.plane == plane)
+			return;
+	}
+
+	loadingQueue.push_back({plane, queueGeneration});
+	plane->ready = ImagePlaneData::ISSUED;
+	queueCondition.notify_one();
+}
+
+
 // Helper process, loading data from queue
 void NoPlayer::loader()
 {
 	while (true)
 	{
-		mtx.lock();
-		if (!loadingQueue.empty())
 		{
-			size_t idx = loadingQueue.size() - 1;
-			ImagePlaneData* plane = loadingQueue[idx];
+			LoadTask task;
+			{
+				std::unique_lock<std::mutex> lock(mtx);
+				queueCondition.wait(lock, [this]()
+				{
+					return loaderStop || !loadingQueue.empty();
+				});
 
-			loadingQueue.erase(loadingQueue.begin() + idx);
+				if (loaderStop && loadingQueue.empty())
+					return;
 
-			mtx.unlock();
+				task = loadingQueue.back();
+				loadingQueue.pop_back();
+				++activeLoads;
+			}
 
-			if (plane->pixels == nullptr)
-				plane->load();
+			if (task.plane && task.plane->pixels == nullptr)
+				task.plane->load();
 
-			mtx.lock();
-			textureQueue.push(plane);
-			mtx.unlock();
-		}
-		else
-		{
-			mtx.unlock();
-			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			{
+				std::lock_guard<std::mutex> lock(mtx);
+				// Skip stale tasks from older file drops.
+				if (!loaderStop &&
+					task.generation == queueGeneration &&
+					task.plane &&
+					task.plane->ready == ImagePlaneData::LOADED)
+				{
+					textureQueue.push(task);
+				}
+				--activeLoads;
+				queueCondition.notify_all();
+			}
 		}
 	}
 }
@@ -275,11 +332,7 @@ void NoPlayer::run()
 			if ( plane.ready < ImagePlaneData::LOADING_STARTED)
 			{
 				std::unique_lock<std::mutex> lock(mtx);
-				if (loadingQueue.back() != &plane)
-				{
-					loadingQueue.push_back(&plane);
-					plane.ready = ImagePlaneData::ISSUED;
-				}
+				enqueueLoadLocked(&plane);
 			}
 			else
 			{
@@ -288,8 +341,7 @@ void NoPlayer::run()
 				if ( imagePlanes[next].MIPs[activeMIP].ready == ImagePlaneData::NOT_ISSUED)
 				{
 					std::unique_lock<std::mutex> lock(mtx);
-					loadingQueue.push_back(&imagePlanes[next].MIPs[activeMIP]);
-					imagePlanes[next].MIPs[activeMIP].ready = ImagePlaneData::ISSUED;
+					enqueueLoadLocked(&imagePlanes[next].MIPs[activeMIP]);
 				}
 
 				// preload next MIP
@@ -297,8 +349,7 @@ void NoPlayer::run()
 				if ( imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == ImagePlaneData::NOT_ISSUED)
 				{
 					std::unique_lock<std::mutex> lock(mtx);
-					loadingQueue.push_back(&imagePlanes[activePlaneIdx].MIPs[nextMIP]);
-					imagePlanes[activePlaneIdx].MIPs[nextMIP].ready = ImagePlaneData::ISSUED;
+					enqueueLoadLocked(&imagePlanes[activePlaneIdx].MIPs[nextMIP]);
 				}
 			}
 
@@ -309,12 +360,18 @@ void NoPlayer::run()
 			// }
 
 			// Generate texture for imagePlane from the Queue
-			if (textureQueue.size()!=0)
+			LoadTask finishedTask;
 			{
-				textureQueue.front()->generateGlTexture();
-				mtx.lock();
-				textureQueue.pop();
-				mtx.unlock();
+				std::lock_guard<std::mutex> lock(mtx);
+				if (!textureQueue.empty())
+				{
+					finishedTask = textureQueue.front();
+					textureQueue.pop();
+				}
+			}
+			if (finishedTask.plane && finishedTask.generation == queueGeneration)
+			{
+				finishedTask.plane->generateGlTexture();
 			}
 		}
 	}
