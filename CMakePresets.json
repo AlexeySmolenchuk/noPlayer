@@ -37,6 +37,11 @@
       "name": "linux-debug",
       "displayName": "Linux Debug (Ninja + vcpkg)",
       "inherits": "base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
       "binaryDir": "${sourceDir}/build/linux-debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -47,6 +52,11 @@
       "name": "linux-release",
       "displayName": "Linux Release (Ninja + vcpkg)",
       "inherits": "base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
       "binaryDir": "${sourceDir}/build/linux-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
@@ -57,6 +67,11 @@
       "name": "windows-debug",
       "displayName": "Windows Debug (Ninja + vcpkg)",
       "inherits": "base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
       "binaryDir": "${sourceDir}/build/windows-debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -67,6 +82,11 @@
       "name": "windows-release",
       "displayName": "Windows Release (Ninja + vcpkg)",
       "inherits": "base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
       "binaryDir": "${sourceDir}/build/windows-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
@@ -88,21 +108,41 @@
     {
       "name": "linux-debug",
       "displayName": "Build Linux Debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
       "configurePreset": "linux-debug"
     },
     {
       "name": "linux-release",
       "displayName": "Build Linux Release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
       "configurePreset": "linux-release"
     },
     {
       "name": "windows-debug",
       "displayName": "Build Windows Debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
       "configurePreset": "windows-debug"
     },
     {
       "name": "windows-release",
       "displayName": "Build Windows Release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
       "configurePreset": "windows-release"
     }
   ]
