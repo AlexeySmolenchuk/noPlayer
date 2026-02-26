@@ -18,29 +18,108 @@
 
 #include <OpenImageIO/imagecache.h>
 
+/**
+ * @brief Interactive image viewer application.
+ *
+ * Manages the GLFW window, ImGui UI, image discovery/loading, and OpenGL
+ * rendering. Image loading is performed asynchronously by a worker thread.
+ */
 class NoPlayer
 {
 
 public:
+	/**
+	 * @brief Create the application window and initialize rendering/UI systems.
+	 */
 	NoPlayer();
+
+	/**
+	 * @brief Stop background work and release UI/window resources.
+	 */
 	~NoPlayer();
 
+	/**
+	 * @brief Load metadata for an image file and queue plane loading.
+	 *
+	 * @param fileName Path to the image file to open.
+	 * @param fresh When true, reset view state (zoom, offsets, active plane/MIP).
+	 */
 	void init(const char* fileName, bool fresh = true);
+
+	/**
+	 * @brief Run the main event/render loop until the window is closed.
+	 */
 	void run();
+
+	/**
+	 * @brief Draw one frame of UI and image content.
+	 */
 	void draw();
+
+	/**
+	 * @brief Select channel display mode.
+	 * @param idx Channel selector: 0 for combined view, 1..N for individual channels.
+	 */
 	void setChannelSoloing(int idx) {channelSoloing = idx;}
+
+	/**
+	 * @brief Clear current image state and wait for in-flight loads to finish.
+	 */
 	void clear();
+
+	/**
+	 * @brief Get the currently opened image file path.
+	 * @return Current image file path, or an empty string if none is set.
+	 */
 	std::string getFileName() {return imageFileName;}
 
 private:
+	/**
+	 * @brief Inspect the file and build the in-memory image plane model.
+	 * @return True on success, false when the file cannot be scanned.
+	 */
 	bool scanImageFile();
+
+	/**
+	 * @brief Configure OpenColorIO state used during rendering.
+	 */
 	void configureOCIO();
+
+	/**
+	 * @brief Create the fullscreen quad geometry used for image drawing.
+	 */
 	void createPlane();
+
+	/**
+	 * @brief Compile and attach a shader stage to a program.
+	 * @param program OpenGL program handle.
+	 * @param shaderCode GLSL source code.
+	 * @param type Shader stage type (for example, @c GL_VERTEX_SHADER).
+	 */
 	void addShader(GLuint program, const char* shaderCode, GLenum type);
+
+	/**
+	 * @brief Build and link shader programs used by the renderer.
+	 */
 	void createShaders();
+
+	/**
+	 * @brief Background worker entry point that loads plane pixels from disk.
+	 */
 	void loader();
+
+	/**
+	 * @brief Queue an image plane for background loading.
+	 *
+	 * The caller must hold @c mtx before calling this function.
+	 *
+	 * @param plane Plane data to enqueue.
+	 */
 	void enqueueLoadLocked(ImagePlaneData* plane);
 
+	/**
+	 * @brief Work item used by asynchronous loading and texture upload queues.
+	 */
 	struct LoadTask
 	{
 		ImagePlaneData* plane = nullptr;

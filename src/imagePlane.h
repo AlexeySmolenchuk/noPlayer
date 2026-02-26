@@ -22,11 +22,34 @@
 #endif
 
 
-// Represent image data and properties of certain level of MIP
+/**
+ * @brief Image data and metadata for a single subimage/MIP/channel group.
+ *
+ * Instances are created during file scanning and transitioned through a loading
+ * state machine as pixels are read and uploaded to OpenGL.
+ */
 struct ImagePlaneData
 {
+	/**
+	 * @brief Load pixel data from disk into CPU memory.
+	 *
+	 * This updates @c ready from @c ISSUED to @c LOADING_STARTED and then to
+	 * @c LOADED when successful.
+	 */
 	void load();
+
+	/**
+	 * @brief Upload loaded pixels to a GPU texture.
+	 *
+	 * On success, updates @c ready to @c TEXTURE_GENERATED.
+	 */
 	void generateGlTexture();
+
+	/**
+	 * @brief Compute channel-wise pixel range.
+	 * @param minimum Output array for minimum values, one entry per channel.
+	 * @param maximum Output array for maximum values, one entry per channel.
+	 */
 	void getRange(float*, float*);
 
 	std::string imageFileName;
@@ -63,13 +86,16 @@ struct ImagePlaneData
 	std::shared_ptr<precision[]> pixels;	// fill deferred
 	GLuint glTexture;	// fill deferred
 
+	/**
+	 * @brief Loading and upload state for the plane.
+	 */
 	enum state
 	{
-		NOT_ISSUED,
-		ISSUED,
-		LOADING_STARTED,
-		LOADED,
-		TEXTURE_GENERATED,
+		NOT_ISSUED,       ///< Plane has not been scheduled for load.
+		ISSUED,           ///< Plane has been queued for background loading.
+		LOADING_STARTED,  ///< Worker thread started reading pixel data.
+		LOADED,           ///< Pixel data is available in CPU memory.
+		TEXTURE_GENERATED, ///< OpenGL texture has been created and filled.
 	};
 
 	state ready = NOT_ISSUED;
@@ -79,7 +105,9 @@ struct ImagePlaneData
 };
 
 
-// Represent individual channel 'group' within multichannel or multipart image 
+/**
+ * @brief Logical image plane shown in the viewer (AOV/group with MIPs).
+ */
 struct ImagePlane
 {
 	std::string name;		// name of sub-image from metadata
