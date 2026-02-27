@@ -12,6 +12,21 @@ int clampMipIndexForPlane(const ImagePlane& plane, int mipIndex)
 		return 0;
 	return std::clamp(mipIndex, 0, static_cast<int>(plane.MIPs.size()) - 1);
 }
+
+void releasePlaneTextures(std::vector<ImagePlane>& planes)
+{
+	for (ImagePlane& plane : planes)
+	{
+		for (ImagePlaneData& mip : plane.MIPs)
+		{
+			if (mip.glTexture != 0)
+			{
+				glDeleteTextures(1, &mip.glTexture);
+				mip.glTexture = 0;
+			}
+		}
+	}
+}
 }
 
 void dropCallback(GLFWwindow* window, int count, const char** paths)
@@ -234,6 +249,7 @@ void NoPlayer::clear()
 		textureQueue.pop();
 	queueCondition.wait(lock, [this]() { return activeLoads == 0; });
 
+	releasePlaneTextures(imagePlanes);
 	imagePlanes.clear();
 	activePlaneIdx = 0;
 	activeMIP = 0;
@@ -250,6 +266,34 @@ NoPlayer::~NoPlayer()
 	}
 	if (loaderThread.joinable())
 		loaderThread.join();
+
+	glfwMakeContextCurrent(mainWindow);
+	{
+		std::lock_guard<std::mutex> lock(mtx);
+		releasePlaneTextures(imagePlanes);
+		imagePlanes.clear();
+	}
+
+	if (shader != 0)
+	{
+		glDeleteProgram(shader);
+		shader = 0;
+	}
+	if (frameShader != 0)
+	{
+		glDeleteProgram(frameShader);
+		frameShader = 0;
+	}
+	if (VBO != 0)
+	{
+		glDeleteBuffers(1, &VBO);
+		VBO = 0;
+	}
+	if (VAO != 0)
+	{
+		glDeleteVertexArrays(1, &VAO);
+		VAO = 0;
+	}
 
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplGlfw_Shutdown();

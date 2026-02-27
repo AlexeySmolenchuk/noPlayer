@@ -127,7 +127,7 @@ private:
 	};
 
 private:
-	GLFWwindow *mainWindow;
+	GLFWwindow *mainWindow = nullptr;
 
 	std::string imageFileName;
 	unsigned int subimages;
@@ -146,11 +146,11 @@ private:
 	int activePlaneIdx;
 	int activeMIP;
 
-	GLuint VAO;
-	GLuint VBO;
+	GLuint VAO = 0;
+	GLuint VBO = 0;
 
-	GLuint shader;
-	GLuint frameShader;
+	GLuint shader = 0;
+	GLuint frameShader = 0;
 
 	float scale;
 	float offsetX;
