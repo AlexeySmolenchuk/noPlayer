@@ -105,19 +105,24 @@ void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int 
 				glfwSetWindowSize(mainWindow, w, h);
 				fullScreen = false;
 			}
-			else
-			{
-				glfwGetWindowPos(mainWindow, &x, &y);
-				glfwGetWindowSize(mainWindow, &w, &h);
-				GLFWmonitor *monitor = getCurrentMonitor(mainWindow);
-				int _x, _y ,_w ,_h;
-				glfwGetMonitorWorkarea(monitor, &_x, &_y, &_w, &_h);
-				glfwSetWindowPos(mainWindow, _x, _y);
+				else
+				{
+					glfwGetWindowPos(mainWindow, &x, &y);
+					glfwGetWindowSize(mainWindow, &w, &h);
+					GLFWmonitor *monitor = getCurrentMonitor(mainWindow);
+					if (!monitor)
+						return;
 
-				const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-				glfwSetWindowSize(mainWindow, mode->width, mode->height);
-				fullScreen = true;
-			}
+					int _x, _y ,_w ,_h;
+					glfwGetMonitorWorkarea(monitor, &_x, &_y, &_w, &_h);
+					glfwSetWindowPos(mainWindow, _x, _y);
+
+					const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+					if (!mode)
+						return;
+					glfwSetWindowSize(mainWindow, mode->width, mode->height);
+					fullScreen = true;
+				}
 			glfwSwapBuffers(mainWindow);
 		}
 	}
