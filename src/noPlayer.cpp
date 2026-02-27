@@ -284,39 +284,43 @@ void NoPlayer::loader()
 {
 	while (true)
 	{
+		LoadTask task;
 		{
-			LoadTask task;
+			std::unique_lock<std::mutex> lock(mtx);
+			queueCondition.wait(lock, [this]()
 			{
-				std::unique_lock<std::mutex> lock(mtx);
-				queueCondition.wait(lock, [this]()
-				{
-					return loaderStop || !loadingQueue.empty();
-				});
+				return loaderStop || !loadingQueue.empty();
+			});
 
-				if (loaderStop && loadingQueue.empty())
-					return;
+			if (loaderStop && loadingQueue.empty())
+				return;
 
-				task = loadingQueue.back();
-				loadingQueue.pop_back();
-				++activeLoads;
+			task = loadingQueue.back();
+			loadingQueue.pop_back();
+
+			if (task.plane == nullptr ||
+				task.generation != queueGeneration ||
+				task.plane->ready != ImagePlaneData::ISSUED)
+			{
+				continue;
 			}
 
-			if (task.plane && task.plane->pixels == nullptr)
-				task.plane->load();
+			task.plane->ready = ImagePlaneData::LOADING_STARTED;
+			++activeLoads;
+		}
 
+		bool loadOk = task.plane->load();
+
+		{
+			std::lock_guard<std::mutex> lock(mtx);
+			if (!loaderStop && task.generation == queueGeneration && task.plane)
 			{
-				std::lock_guard<std::mutex> lock(mtx);
-				// Skip stale tasks from older file drops.
-				if (!loaderStop &&
-					task.generation == queueGeneration &&
-					task.plane &&
-					task.plane->ready == ImagePlaneData::LOADED)
-				{
+				task.plane->ready = loadOk ? ImagePlaneData::LOADED : ImagePlaneData::NOT_ISSUED;
+				if (loadOk)
 					textureQueue.push(task);
-				}
-				--activeLoads;
-				queueCondition.notify_all();
 			}
+			--activeLoads;
+			queueCondition.notify_all();
 		}
 	}
 }
@@ -340,27 +344,33 @@ void NoPlayer::run()
 			activeMIP = clampMipIndexForPlane(imagePlanes[activePlaneIdx], activeMIP);
 			ImagePlaneData &plane = imagePlanes[activePlaneIdx].MIPs[activeMIP];
 
-			if ( plane.ready < ImagePlaneData::LOADING_STARTED)
+			ImagePlaneData::state planeReady;
+			{
+				std::lock_guard<std::mutex> lock(mtx);
+				planeReady = plane.ready;
+			}
+
+			if (planeReady < ImagePlaneData::LOADING_STARTED)
 			{
 				std::unique_lock<std::mutex> lock(mtx);
 				enqueueLoadLocked(&plane);
 			}
-				else
-				{
-					// we can preload next AOV
-					int next = (activePlaneIdx + 1)%imagePlanes.size();
-					int nextMipForPlane = clampMipIndexForPlane(imagePlanes[next], activeMIP);
-					if ( imagePlanes[next].MIPs[nextMipForPlane].ready == ImagePlaneData::NOT_ISSUED)
-					{
-						std::unique_lock<std::mutex> lock(mtx);
-						enqueueLoadLocked(&imagePlanes[next].MIPs[nextMipForPlane]);
-					}
+			else
+			{
+				std::unique_lock<std::mutex> lock(mtx);
 
-					// preload next MIP
-					int nextMIP = (activeMIP + 1) % imagePlanes[activePlaneIdx].MIPs.size();
-				if ( imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == ImagePlaneData::NOT_ISSUED)
+				// we can preload next AOV
+				int next = (activePlaneIdx + 1)%imagePlanes.size();
+				int nextMipForPlane = clampMipIndexForPlane(imagePlanes[next], activeMIP);
+				if (imagePlanes[next].MIPs[nextMipForPlane].ready == ImagePlaneData::NOT_ISSUED)
 				{
-					std::unique_lock<std::mutex> lock(mtx);
+					enqueueLoadLocked(&imagePlanes[next].MIPs[nextMipForPlane]);
+				}
+
+				// preload next MIP
+				int nextMIP = (activeMIP + 1) % imagePlanes[activePlaneIdx].MIPs.size();
+				if (imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == ImagePlaneData::NOT_ISSUED)
+				{
 					enqueueLoadLocked(&imagePlanes[activePlaneIdx].MIPs[nextMIP]);
 				}
 			}
@@ -381,9 +391,14 @@ void NoPlayer::run()
 					textureQueue.pop();
 				}
 			}
-			if (finishedTask.plane && finishedTask.generation == queueGeneration)
+			if (finishedTask.plane)
 			{
-				finishedTask.plane->generateGlTexture();
+				bool generated = finishedTask.plane->generateGlTexture();
+				std::lock_guard<std::mutex> lock(mtx);
+				if (finishedTask.generation == queueGeneration)
+				{
+					finishedTask.plane->ready = generated ? ImagePlaneData::TEXTURE_GENERATED : ImagePlaneData::NOT_ISSUED;
+				}
 			}
 		}
 	}
@@ -454,6 +469,11 @@ void NoPlayer::draw()
 	activeMIP = clampMipIndexForPlane(plane, activeMIP);
 
 	ImagePlaneData &planeData = plane.MIPs[activeMIP];
+	ImagePlaneData::state planeReady;
+	{
+		std::lock_guard<std::mutex> lock(mtx);
+		planeReady = planeData.ready;
+	}
 	float compensateMIP = powf(2.0f, planeData.mip);
 
 	static bool ui = true;
@@ -773,7 +793,12 @@ void NoPlayer::draw()
 					ImVec4(0.5, 0.5, 0.5, 1),
 					ImVec4(0.5, 0.5, 0.5, 1)
 					};
-				ImGui::TextColored( clrs[imagePlanes[n].MIPs[planeMipIdx].ready], "%5s", imagePlanes[n].MIPs[planeMipIdx].format.c_str());
+				ImagePlaneData::state listPlaneReady;
+				{
+					std::lock_guard<std::mutex> lock(mtx);
+					listPlaneReady = imagePlanes[n].MIPs[planeMipIdx].ready;
+				}
+				ImGui::TextColored( clrs[static_cast<int>(listPlaneReady)], "%5s", imagePlanes[n].MIPs[planeMipIdx].format.c_str());
 				ImGui::SameLine();
 
 			if(activePlaneIdx == n)
@@ -868,7 +893,7 @@ void NoPlayer::draw()
 		}
 	}
 
-	if(planeData.ready != ImagePlaneData::TEXTURE_GENERATED)
+	if (planeReady != ImagePlaneData::TEXTURE_GENERATED)
 	{
 		const char* message = "Loading...";
 		ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2.f);
@@ -923,10 +948,10 @@ void NoPlayer::draw()
 										(int)(coords.y - planeData.windowOffsetY));
 			}
 
-			if (planeData.ready >= ImagePlaneData::LOADED)
-			{
-				for (int i=0; i<planeData.len; i++)
-					ImGui::Text("%s %g",  planeData.channels.substr(i, 1).c_str(),  planeData.buffer.getchannel(x, y, 0, planeData.begin+i));
+				if (planeReady >= ImagePlaneData::LOADED)
+				{
+					for (int i=0; i<planeData.len; i++)
+						ImGui::Text("%s %g",  planeData.channels.substr(i, 1).c_str(),  planeData.buffer.getchannel(x, y, 0, planeData.begin+i));
 			}
 
 			ImGui::End();

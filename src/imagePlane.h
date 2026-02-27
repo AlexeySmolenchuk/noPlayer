@@ -33,17 +33,16 @@ struct ImagePlaneData
 	/**
 	 * @brief Load pixel data from disk into CPU memory.
 	 *
-	 * This updates @c ready from @c ISSUED to @c LOADING_STARTED and then to
-	 * @c LOADED when successful.
+	 * @return True when pixels were loaded successfully.
 	 */
-	void load();
+	bool load();
 
 	/**
 	 * @brief Upload loaded pixels to a GPU texture.
 	 *
-	 * On success, updates @c ready to @c TEXTURE_GENERATED.
+	 * @return True when the texture upload succeeds.
 	 */
-	void generateGlTexture();
+	bool generateGlTexture();
 
 	/**
 	 * @brief Compute channel-wise pixel range.
