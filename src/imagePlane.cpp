@@ -114,6 +114,12 @@ void ImagePlaneData::generateGlTexture()
 	if (ready != LOADED)
 		return;
 
+	if (len < 1 || len > 4 || pixels == nullptr)
+	{
+		ready = NOT_ISSUED;
+		return;
+	}
+
 	glPixelStorei(GL_PACK_ALIGNMENT, 2);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
 

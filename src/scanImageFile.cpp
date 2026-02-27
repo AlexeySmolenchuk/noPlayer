@@ -19,6 +19,7 @@ bool NoPlayer::scanImageFile()
 
 	const std::vector<std::string> predefined = {"RGBA", "XYZ", "UV", "rgba", "xyz", "uv"};
 	std::vector<ImagePlaneData> imagePlanesFlattened; // Flattened data will be organized by names after reading
+	bool truncatedChannels = false;
 	
 	int mip = 0;
 	while (inp->seek_subimage(subimages, mip))
@@ -152,6 +153,24 @@ bool NoPlayer::scanImageFile()
 		}
 		subimages++;
 		mip = 0;
+	}
+
+	for (ImagePlaneData &planeData : imagePlanesFlattened)
+	{
+		if (planeData.len > 4)
+		{
+			planeData.len = 4;
+			if (planeData.channels.size() > 4)
+				planeData.channels = planeData.channels.substr(0, 4);
+			truncatedChannels = true;
+		}
+	}
+
+	if (truncatedChannels)
+	{
+		if (!message.empty())
+			message += "\n";
+		message += "Some channel groups have more than 4 channels. Display is limited to the first 4 channels.";
 	}
 
 	// Store all image planes to the name based structure
