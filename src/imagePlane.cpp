@@ -2,7 +2,7 @@
 #include "imagePlane.h"
 #include <OpenImageIO/imagebuf.h>
 #include <OpenImageIO/imagebufalgo.h>
-#include <float.h>
+#include <limits>
 
 bool ImagePlaneData::load()
 {
@@ -84,8 +84,8 @@ void ImagePlaneData::getRange(float *minimum, float *maximum)
 {
 	for (int i = 0; i < len; i++)
 	{
-		minimum[i] = FLT_MAX;
-		maximum[i] = FLT_MIN;
+		minimum[i] = std::numeric_limits<float>::max();
+		maximum[i] = std::numeric_limits<float>::lowest();
 	}
 
 	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };

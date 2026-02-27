@@ -3,6 +3,7 @@
 #include <imgui_impl_glfw.h>
 #include <OpenImageIO/imageio.h>
 #include <OpenEXR/OpenEXRConfig.h>
+#include <limits>
 
 namespace
 {
@@ -653,10 +654,10 @@ void NoPlayer::draw()
 		{
 			if (channelSoloing <= planeData.len)
 			{
-				float pixel_min[4], pixel_max[4];
-				float min_value = FLT_MAX;
-				float max_value = FLT_MIN;
-				float t;
+					float pixel_min[4], pixel_max[4];
+					float min_value = std::numeric_limits<float>::max();
+					float max_value = std::numeric_limits<float>::lowest();
+					float t;
 				// TODO: schedule image stats upfront asynchronously 
 				planeData.getRange(pixel_min, pixel_max);
 
