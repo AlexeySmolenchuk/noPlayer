@@ -4,6 +4,16 @@
 #include <OpenImageIO/imageio.h>
 #include <OpenEXR/OpenEXRConfig.h>
 
+namespace
+{
+int clampMipIndexForPlane(const ImagePlane& plane, int mipIndex)
+{
+	if (plane.MIPs.empty())
+		return 0;
+	return std::clamp(mipIndex, 0, static_cast<int>(plane.MIPs.size()) - 1);
+}
+}
+
 void dropCallback(GLFWwindow* window, int count, const char** paths)
 {
     // for (int i = 0;  i < count;  i++)
@@ -327,6 +337,7 @@ void NoPlayer::run()
 
 		if (imagePlanes.size())
 		{
+			activeMIP = clampMipIndexForPlane(imagePlanes[activePlaneIdx], activeMIP);
 			ImagePlaneData &plane = imagePlanes[activePlaneIdx].MIPs[activeMIP];
 
 			if ( plane.ready < ImagePlaneData::LOADING_STARTED)
@@ -334,18 +345,19 @@ void NoPlayer::run()
 				std::unique_lock<std::mutex> lock(mtx);
 				enqueueLoadLocked(&plane);
 			}
-			else
-			{
-				// we can preload next AOV
-				int next = (activePlaneIdx + 1)%imagePlanes.size();
-				if ( imagePlanes[next].MIPs[activeMIP].ready == ImagePlaneData::NOT_ISSUED)
+				else
 				{
-					std::unique_lock<std::mutex> lock(mtx);
-					enqueueLoadLocked(&imagePlanes[next].MIPs[activeMIP]);
-				}
+					// we can preload next AOV
+					int next = (activePlaneIdx + 1)%imagePlanes.size();
+					int nextMipForPlane = clampMipIndexForPlane(imagePlanes[next], activeMIP);
+					if ( imagePlanes[next].MIPs[nextMipForPlane].ready == ImagePlaneData::NOT_ISSUED)
+					{
+						std::unique_lock<std::mutex> lock(mtx);
+						enqueueLoadLocked(&imagePlanes[next].MIPs[nextMipForPlane]);
+					}
 
-				// preload next MIP
-				int nextMIP = (activeMIP + 1) % imagePlanes[activePlaneIdx].MIPs.size();
+					// preload next MIP
+					int nextMIP = (activeMIP + 1) % imagePlanes[activePlaneIdx].MIPs.size();
 				if ( imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == ImagePlaneData::NOT_ISSUED)
 				{
 					std::unique_lock<std::mutex> lock(mtx);
@@ -439,6 +451,7 @@ void NoPlayer::draw()
 	}
 
 	ImagePlane &plane = imagePlanes[activePlaneIdx];
+	activeMIP = clampMipIndexForPlane(plane, activeMIP);
 
 	ImagePlaneData &planeData = plane.MIPs[activeMIP];
 	float compensateMIP = powf(2.0f, planeData.mip);
@@ -500,17 +513,19 @@ void NoPlayer::draw()
 	// Shortcuts
 	if (!io.WantCaptureKeyboard)
 	{
-		if (ImGui::IsKeyPressed(ImGuiKey_RightBracket))
-		{
-			activePlaneIdx = (activePlaneIdx+1)%imagePlanes.size();
-			channelSoloing = 0;
-		}
+			if (ImGui::IsKeyPressed(ImGuiKey_RightBracket))
+			{
+				activePlaneIdx = (activePlaneIdx+1)%imagePlanes.size();
+				activeMIP = clampMipIndexForPlane(imagePlanes[activePlaneIdx], activeMIP);
+				channelSoloing = 0;
+			}
 
-		if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket))
-		{
-			activePlaneIdx = (imagePlanes.size()+activePlaneIdx-1)%imagePlanes.size();
-			channelSoloing = 0;
-		}
+			if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket))
+			{
+				activePlaneIdx = (imagePlanes.size()+activePlaneIdx-1)%imagePlanes.size();
+				activeMIP = clampMipIndexForPlane(imagePlanes[activePlaneIdx], activeMIP);
+				channelSoloing = 0;
+			}
 		if (ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_Keypad9))
 			activeMIP = std::max(0, activeMIP-1);
 
@@ -747,18 +762,19 @@ void NoPlayer::draw()
 					| ImGuiWindowFlags_NoBackground;
 
 		ImGui::Begin( "AOVs", nullptr, windowFlags);
-		for (int n = 0; n < imagePlanes.size(); n++)
-		{
+			for (int n = 0; n < imagePlanes.size(); n++)
+			{
+				int planeMipIdx = clampMipIndexForPlane(imagePlanes[n], activeMIP);
 
-			const ImVec4 clrs[] = {
-				ImVec4(0.35, 0.35, 0.35, 1),
-				ImVec4(0.2, 0.2, 0.2, 1),
-				ImVec4(0.65, 0.65, 0.65, 1),
-				ImVec4(0.5, 0.5, 0.5, 1),
-				ImVec4(0.5, 0.5, 0.5, 1)
-				};
-			ImGui::TextColored( clrs[imagePlanes[n].MIPs[activeMIP].ready], "%5s", imagePlanes[n].MIPs[activeMIP].format.c_str());
-			ImGui::SameLine();
+				const ImVec4 clrs[] = {
+					ImVec4(0.35, 0.35, 0.35, 1),
+					ImVec4(0.2, 0.2, 0.2, 1),
+					ImVec4(0.65, 0.65, 0.65, 1),
+					ImVec4(0.5, 0.5, 0.5, 1),
+					ImVec4(0.5, 0.5, 0.5, 1)
+					};
+				ImGui::TextColored( clrs[imagePlanes[n].MIPs[planeMipIdx].ready], "%5s", imagePlanes[n].MIPs[planeMipIdx].format.c_str());
+				ImGui::SameLine();
 
 			if(activePlaneIdx == n)
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0, 1.0, 1.0, 1));
