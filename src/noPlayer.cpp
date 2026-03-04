@@ -9,6 +9,15 @@
 
 namespace
 {
+constexpr int SOLO_NONE = 0;
+constexpr int SOLO_R = 1;
+constexpr int SOLO_G = 2;
+constexpr int SOLO_B = 3;
+constexpr int SOLO_H = 4;
+constexpr int SOLO_S = 5;
+constexpr int SOLO_L = 6;
+constexpr int SOLO_A = 7;
+
 int clampMipIndexForPlane(const ImagePlane& plane, int mipIndex)
 {
 	if (plane.MIPs.empty())
@@ -44,6 +53,28 @@ bool isRgbChannels(const std::string& channels)
 	return isChannel(channels[0], 'r')
 		&& isChannel(channels[1], 'g')
 		&& isChannel(channels[2], 'b');
+}
+
+bool isHslSolo(int mode)
+{
+	return mode >= SOLO_H && mode <= SOLO_L;
+}
+
+bool canRenderSoloMode(int mode, const ImagePlaneData& plane)
+{
+	if (mode == SOLO_NONE)
+		return true;
+
+	if (mode >= SOLO_R && mode <= SOLO_B)
+		return mode <= plane.len;
+
+	if (isHslSolo(mode) && plane.len >= 3 && isRgbChannels(plane.channels))
+		return true;
+
+	if (mode == SOLO_A && plane.len >= 4)
+		return true;
+
+	return false;
 }
 
 void rgbToHsl(float r, float g, float b, float& h, float& s, float& l)
@@ -718,30 +749,35 @@ void NoPlayer::draw()
 
 		if (ImGui::IsKeyPressed(ImGuiKey_R))
 		{
-			if (channelSoloing <= planeData.len)
+			if (planeData.len > 0)
 			{
-					float pixel_min[4], pixel_max[4];
-					float min_value = std::numeric_limits<float>::max();
-					float max_value = std::numeric_limits<float>::lowest();
-					float t;
+				float pixel_min[4], pixel_max[4];
+				float min_value = std::numeric_limits<float>::max();
+				float max_value = std::numeric_limits<float>::lowest();
+				float t;
 				// TODO: schedule image stats upfront asynchronously 
 				planeData.getRange(pixel_min, pixel_max);
 
-				if (channelSoloing > 0)
+				if (channelSoloing >= SOLO_R && channelSoloing <= SOLO_B && channelSoloing <= planeData.len)
 				{
 					min_value = pixel_min[channelSoloing-1];
 					max_value = pixel_max[channelSoloing-1];
-					// std::cout << planeData.buffer.spec().format << " " << min_value << " ... " << max_value << std::endl;
+				}
+				else if (channelSoloing == SOLO_A && planeData.len >= 4)
+				{
+					min_value = pixel_min[3];
+					max_value = pixel_max[3];
 				}
 				else
 				{
-					for (int i = 0; i < std::max(1, planeData.len-1); i++)
+					const int rgbChannels = std::max(1, std::min(3, planeData.len));
+					for (int i = 0; i < rgbChannels; i++)
 					{
 						min_value = std::min(min_value, pixel_min[i]);
 						max_value = std::max(max_value, pixel_max[i]);
 					}
-					// std::cout << planeData.buffer.spec().format << " " << min_value << " ... " << max_value << std::endl;
 				}
+
 				float d = (max_value - min_value);
 				if (d>0.00001)
 				{
@@ -756,27 +792,36 @@ void NoPlayer::draw()
 			inspect = !inspect;
 
 		if (ImGui::IsKeyPressed(ImGuiKey_GraveAccent))
-			setChannelSoloing(0);
+			setChannelSoloing(SOLO_NONE);
 
 		if (ImGui::IsKeyPressed(ImGuiKey_1))
-			setChannelSoloing(1);
+			setChannelSoloing(SOLO_R);
 
 		if (ImGui::IsKeyPressed(ImGuiKey_2))
-			setChannelSoloing(2);
+			setChannelSoloing(SOLO_G);
 
 		if (ImGui::IsKeyPressed(ImGuiKey_3))
-			setChannelSoloing(3);
+			setChannelSoloing(SOLO_B);
 
 		if (ImGui::IsKeyPressed(ImGuiKey_4))
-			setChannelSoloing(4);
+			setChannelSoloing(SOLO_H);
+
+		if (ImGui::IsKeyPressed(ImGuiKey_5))
+			setChannelSoloing(SOLO_S);
+
+		if (ImGui::IsKeyPressed(ImGuiKey_6))
+			setChannelSoloing(SOLO_L);
+
+		if (ImGui::IsKeyPressed(ImGuiKey_7))
+			setChannelSoloing(SOLO_A);
 	}
 
 	if (help)
 	{
 
-			static const char* helpMsg = 
-				"              Shortcuts:\n\n"
-				"` 1 2 3 4     (top row) RGB / R / G / B / A\n\n"
+				static const char* helpMsg = 
+					"              Shortcuts:\n\n"
+					"` 1 2 3 4 5 6 7 (top row) RGB / R / G / B / H / S / L / A\n\n"
 				"0 - =         (top row) Exposure Reset / EV- / EV+\n\n"
 				"R             Adjust Gain and Offset to fit Range\n\n"
 				"[             Previous AOV\n\n"
@@ -939,17 +984,30 @@ void NoPlayer::draw()
 
 			if(activePlaneIdx == n)
 			{
-				if (channelSoloing==0)
+				if (channelSoloing == SOLO_NONE)
 				{
 					ImGui::Text(plane.channels.c_str());
 				}
-				else
+				else if (isHslSolo(channelSoloing) && planeData.len >= 3 && isRgbChannels(plane.channels))
 				{
-					for (int i = 0; i < planeData.len; i++)
+					const char* hsl = "HSL";
+					for (int i = 0; i < 3; i++)
 					{
 						if (i) ImGui::SameLine(0, 0);
-						ImGui::TextColored( ((i+1)==channelSoloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1), plane.channels.substr(i, 1).c_str());
+						ImGui::TextColored(((SOLO_H + i) == channelSoloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1),
+										"%c", hsl[i]);
 					}
+				}
+				else
+				{
+						for (int i = 0; i < planeData.len; i++)
+						{
+							if (i) ImGui::SameLine(0, 0);
+							const bool isSelectedChannel = (((i+1) == channelSoloing) && channelSoloing <= SOLO_B)
+								|| (i == 3 && channelSoloing == SOLO_A);
+							ImGui::TextColored(isSelectedChannel ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1),
+										plane.channels.substr(i, 1).c_str());
+						}
 				}
 			}
 			else
@@ -1096,7 +1154,8 @@ void NoPlayer::draw()
 	glViewport(0, 0, displayW, displayH);
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
-	if(channelSoloing <= planeData.len)
+	const bool renderSoloMode = canRenderSoloMode(channelSoloing, planeData);
+	if(renderSoloMode)
 	{
 		glUseProgram(shader);
 
@@ -1131,7 +1190,7 @@ void NoPlayer::draw()
 		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 	}
 
-	if (!planeData.windowMatchData || channelSoloing > planeData.len)
+	if (!planeData.windowMatchData || !renderSoloMode)
 	{
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);

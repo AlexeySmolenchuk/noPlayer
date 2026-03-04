@@ -90,6 +90,35 @@ void NoPlayer::configureOCIO()
 	)glsl" +
 	std::string(shaderDesc->getShaderText()) +
 	R"glsl(
+		vec3 rgbToHsl(vec3 rgb)
+		{
+			float cmax = max(rgb.r, max(rgb.g, rgb.b));
+			float cmin = min(rgb.r, min(rgb.g, rgb.b));
+			float delta = cmax - cmin;
+
+			float h = 0.0;
+			float s = 0.0;
+			float l = (cmax + cmin) * 0.5;
+
+			if (delta > 0.000001)
+			{
+				s = delta / (1.0 - abs(2.0 * l - 1.0));
+
+				if (cmax == rgb.r)
+					h = mod((rgb.g - rgb.b) / delta, 6.0);
+				else if (cmax == rgb.g)
+					h = ((rgb.b - rgb.r) / delta) + 2.0;
+				else
+					h = ((rgb.r - rgb.g) / delta) + 4.0;
+
+				h /= 6.0;
+				if (h < 0.0)
+					h += 1.0;
+			}
+
+			return clamp(vec3(h, s, l), 0.0, 1.0);
+		}
+
 		void main() {
 			FragColor = vec4(0.0);
 			vec4 fragment = texture(textureSampler, texCoords.xy);
@@ -143,6 +172,24 @@ void NoPlayer::configureOCIO()
 					FragColor = FragColor.bbbb;
 					break;
 				case 4:
+				{
+					vec3 hsl = rgbToHsl(FragColor.rgb);
+					FragColor = vec4(hsl.xxx, FragColor.a);
+					break;
+				}
+				case 5:
+				{
+					vec3 hsl = rgbToHsl(FragColor.rgb);
+					FragColor = vec4(hsl.yyy, FragColor.a);
+					break;
+				}
+				case 6:
+				{
+					vec3 hsl = rgbToHsl(FragColor.rgb);
+					FragColor = vec4(hsl.zzz, FragColor.a);
+					break;
+				}
+				case 7:
 					FragColor = FragColor.aaaa;
 					break;
 				}
