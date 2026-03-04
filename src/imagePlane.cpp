@@ -26,7 +26,8 @@ bool ImagePlaneData::load()
 	// Preload first imagePlane
 	if (begin==0)
 	{
-		bool ok = buffer.read(subimage, mip, begin, begin + len, true, TypeDesc::PRECISION);
+		// Keep ImageBuf data in source precision for inspection/measurement.
+		bool ok = buffer.read(subimage, mip, begin, begin + len, true, TypeDesc::UNKNOWN);
 		if (!ok)
 			std::cout << buffer.geterror() << std::endl;
 	}

@@ -102,7 +102,11 @@ void NoPlayer::configureOCIO()
 
 			if (delta > 0.000001)
 			{
-				s = delta / (1.0 - abs(2.0 * l - 1.0));
+				float denominator = 1.0 - abs(2.0 * l - 1.0);
+				if (abs(denominator) > 0.000001)
+					s = delta / denominator;
+				else
+					s = 0.0;
 
 				if (cmax == rgb.r)
 					h = mod((rgb.g - rgb.b) / delta, 6.0);
@@ -116,7 +120,7 @@ void NoPlayer::configureOCIO()
 					h += 1.0;
 			}
 
-			return clamp(vec3(h, s, l), 0.0, 1.0);
+			return vec3(h, s, l);
 		}
 
 		void main() {
@@ -146,6 +150,8 @@ void NoPlayer::configureOCIO()
 				}
 			}
 
+			vec4 rawFragment = fragment;
+
 			fragment += vec4(offsetValues);
 			fragment *= gainValues;
 
@@ -173,19 +179,19 @@ void NoPlayer::configureOCIO()
 					break;
 				case 4:
 				{
-					vec3 hsl = rgbToHsl(FragColor.rgb);
+					vec3 hsl = rgbToHsl(rawFragment.rgb);
 					FragColor = vec4(hsl.xxx, FragColor.a);
 					break;
 				}
 				case 5:
 				{
-					vec3 hsl = rgbToHsl(FragColor.rgb);
+					vec3 hsl = rgbToHsl(rawFragment.rgb);
 					FragColor = vec4(hsl.yyy, FragColor.a);
 					break;
 				}
 				case 6:
 				{
-					vec3 hsl = rgbToHsl(FragColor.rgb);
+					vec3 hsl = rgbToHsl(rawFragment.rgb);
 					FragColor = vec4(hsl.zzz, FragColor.a);
 					break;
 				}
