@@ -83,7 +83,7 @@ void rgbToHsl(float r, float g, float b, float& h, float& s, float& l)
 	{
 		if (!std::isfinite(value))
 			return 0.0f;
-		return std::clamp(value, 0.0f, 1.0f);
+		return value;
 	};
 
 	r = sanitize(r);
@@ -103,7 +103,11 @@ void rgbToHsl(float r, float g, float b, float& h, float& s, float& l)
 		return;
 	}
 
-	s = delta / (1.0f - std::fabs(2.0f * l - 1.0f));
+	const float denominator = 1.0f - std::fabs(2.0f * l - 1.0f);
+	if (std::fabs(denominator) <= std::numeric_limits<float>::epsilon())
+		s = 0.0f;
+	else
+		s = delta / denominator;
 
 	if (cmax == r)
 		h = std::fmod((g - b) / delta, 6.0f);
@@ -113,12 +117,52 @@ void rgbToHsl(float r, float g, float b, float& h, float& s, float& l)
 		h = ((r - g) / delta) + 4.0f;
 
 	h /= 6.0f;
-	if (h < 0.0f)
+	while (h < 0.0f)
 		h += 1.0f;
+	while (h >= 1.0f)
+		h -= 1.0f;
+}
 
-	h = std::clamp(h, 0.0f, 1.0f);
-	s = std::clamp(s, 0.0f, 1.0f);
-	l = std::clamp(l, 0.0f, 1.0f);
+bool isPointInsideImage(const ImVec2& coords, const ImagePlaneData& planeData)
+{
+	return coords.x >= 0.0f
+		&& coords.x < static_cast<float>(planeData.imageWidth)
+		&& coords.y >= 0.0f
+		&& coords.y < static_cast<float>(planeData.imageHeight);
+}
+
+ImVec2 clampImageCoords(const ImVec2& coords, const ImagePlaneData& planeData)
+{
+	const float maxX = std::max(0.0f, static_cast<float>(planeData.imageWidth) - 0.0001f);
+	const float maxY = std::max(0.0f, static_cast<float>(planeData.imageHeight) - 0.0001f);
+	return ImVec2(std::clamp(coords.x, 0.0f, maxX), std::clamp(coords.y, 0.0f, maxY));
+}
+
+void getImageSelectionBounds(const ImVec2& start, const ImVec2& end, const ImagePlaneData& planeData,
+							int& minX, int& minY, int& maxX, int& maxY)
+{
+	if (planeData.imageWidth == 0 || planeData.imageHeight == 0)
+	{
+		minX = maxX = 0;
+		minY = maxY = 0;
+		return;
+	}
+
+	const float imageMaxX = static_cast<float>(planeData.imageWidth) - 1.0f;
+	const float imageMaxY = static_cast<float>(planeData.imageHeight) - 1.0f;
+
+	const float clampedStartX = std::clamp(start.x, 0.0f, imageMaxX);
+	const float clampedStartY = std::clamp(start.y, 0.0f, imageMaxY);
+	const float clampedEndX = std::clamp(end.x, 0.0f, imageMaxX);
+	const float clampedEndY = std::clamp(end.y, 0.0f, imageMaxY);
+
+	minX = std::max(0, static_cast<int>(std::floor(std::min(clampedStartX, clampedEndX))));
+	minY = std::max(0, static_cast<int>(std::floor(std::min(clampedStartY, clampedEndY))));
+	maxX = std::min(static_cast<int>(planeData.imageWidth) - 1, static_cast<int>(std::floor(std::max(clampedStartX, clampedEndX))));
+	maxY = std::min(static_cast<int>(planeData.imageHeight) - 1, static_cast<int>(std::floor(std::max(clampedStartY, clampedEndY))));
+
+	maxX = std::max(maxX, minX);
+	maxY = std::max(maxY, minY);
 }
 }
 
@@ -321,6 +365,9 @@ NoPlayer::init(const char* fileName, bool fresh)
 		channelSoloing = 0;
 		activePlaneIdx = 0;
 		activeMIP = 0;
+		inspectRegionActive = false;
+		inspectRegionDragging = false;
+		inspectRegionMoved = false;
 	}
 
 	// Preload
@@ -351,6 +398,9 @@ void NoPlayer::clear()
 	imagePlanes.clear();
 	activePlaneIdx = 0;
 	activeMIP = 0;
+	inspectRegionActive = false;
+	inspectRegionDragging = false;
+	inspectRegionMoved = false;
 }
 
 
@@ -626,6 +676,27 @@ void NoPlayer::draw()
 	static float factor = 1.0;
 	static ImVec2 shift(0, 0);
 
+	const float centerX = planeData.imageOffsetX + planeData.imageWidth * 0.5f
+						- planeData.windowOffsetX - planeData.windowWidth * 0.5f;
+	const float centerY = planeData.imageOffsetY + planeData.imageHeight * 0.5f
+						- planeData.windowOffsetY - planeData.windowHeight * 0.5f;
+
+	auto screenToImageCoords = [&](const ImVec2& screenCoords)
+	{
+		ImVec2 imageCoords = screenCoords - ImVec2(displayW, displayH) * 0.5f - ImVec2(offsetX, offsetY) + shift;
+		imageCoords /= ImVec2(planeData.pixelAspect, 1.0f) * scale * compensateMIP * factor;
+		imageCoords += ImVec2(planeData.imageWidth, planeData.imageHeight) * 0.5f - ImVec2(centerX, centerY);
+		return imageCoords;
+	};
+
+	auto imageToScreenCoords = [&](const ImVec2& imageCoords)
+	{
+		ImVec2 screenCoords = imageCoords - ImVec2(planeData.imageWidth, planeData.imageHeight) * 0.5f + ImVec2(centerX, centerY);
+		screenCoords *= ImVec2(planeData.pixelAspect, 1.0f) * scale * compensateMIP * factor;
+		screenCoords += ImVec2(displayW, displayH) * 0.5f + ImVec2(offsetX, offsetY) - shift;
+		return screenCoords;
+	};
+
 	// Mouse actions
 	if (!io.WantCaptureMouse)
 	{
@@ -670,6 +741,50 @@ void NoPlayer::draw()
 			offsetX += ImGui::GetIO().MouseDelta.x;
 			offsetY += ImGui::GetIO().MouseDelta.y;
 		}
+
+		if (inspect && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+		{
+			const ImVec2 clickedCoords = screenToImageCoords(io.MouseClickedPos[ImGuiMouseButton_Left]);
+			if (isPointInsideImage(clickedCoords, planeData))
+			{
+				inspectRegionDragging = true;
+				inspectRegionMoved = false;
+				inspectRegionStart = clampImageCoords(clickedCoords, planeData);
+				inspectRegionEnd = inspectRegionStart;
+			}
+		}
+	}
+
+	if (inspectRegionDragging)
+	{
+		if (io.MouseDown[ImGuiMouseButton_Left])
+		{
+			const ImVec2 currentCoords = clampImageCoords(screenToImageCoords(ImGui::GetMousePos()), planeData);
+			inspectRegionEnd = currentCoords;
+			const float deltaX = std::fabs(inspectRegionEnd.x - inspectRegionStart.x);
+			const float deltaY = std::fabs(inspectRegionEnd.y - inspectRegionStart.y);
+			inspectRegionMoved = deltaX >= 1.0f || deltaY >= 1.0f;
+		}
+
+		if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+		{
+			if (inspectRegionMoved)
+			{
+				inspectRegionActive = true;
+			}
+			else if (inspectRegionActive)
+			{
+				inspectRegionActive = false;
+			}
+			inspectRegionDragging = false;
+			inspectRegionMoved = false;
+		}
+	}
+
+	if (!inspect)
+	{
+		inspectRegionDragging = false;
+		inspectRegionMoved = false;
 	}
 
 	// Shortcuts
@@ -789,7 +904,14 @@ void NoPlayer::draw()
 		}
 
 		if (ImGui::IsKeyPressed(ImGuiKey_I))
+		{
 			inspect = !inspect;
+			if (!inspect)
+			{
+				inspectRegionDragging = false;
+				inspectRegionMoved = false;
+			}
+		}
 
 		if (ImGui::IsKeyPressed(ImGuiKey_GraveAccent))
 			setChannelSoloing(SOLO_NONE);
@@ -1074,56 +1196,123 @@ void NoPlayer::draw()
 		ImGui::End();
 	}
 
-	if(inspect)
+	if (inspect)
 	{
-		float centerX = planeData.imageOffsetX + planeData.imageWidth * 0.5f
-						- planeData.windowOffsetX - planeData.windowWidth * 0.5f;
-		float centerY = planeData.imageOffsetY + planeData.imageHeight * 0.5f
-						- planeData.windowOffsetY - planeData.windowHeight * 0.5f;
+		const ImVec2 mousePos = ImGui::GetMousePos();
+		const ImVec2 coords = screenToImageCoords(mousePos);
+		const bool cursorInsideImage = isPointInsideImage(coords, planeData);
 
-		ImVec2 mousePos = ImGui::GetMousePos();
-		ImVec2 coords = mousePos - ImVec2(displayW, displayH)*0.5f - ImVec2(offsetX, offsetY) + shift;
-		coords /= ImVec2(planeData.pixelAspect, 1.0) * scale * compensateMIP * factor;
-		coords += ImVec2(planeData.imageWidth, planeData.imageHeight)*0.5f - ImVec2(centerX, centerY);
+		int selectionMinX = 0;
+		int selectionMinY = 0;
+		int selectionMaxX = 0;
+		int selectionMaxY = 0;
+		if (inspectRegionActive)
+		{
+			getImageSelectionBounds(inspectRegionStart, inspectRegionEnd, planeData,
+									selectionMinX, selectionMinY, selectionMaxX, selectionMaxY);
+		}
 
-		if(coords.x >= 0 && coords.x < planeData.imageWidth && coords.y >= 0 && coords.y < planeData.imageHeight)
+		if (cursorInsideImage || inspectRegionActive)
 		{
 			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.4f));
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
-			ImGui::SetNextWindowPos(mousePos + ImVec2((mousePos.x + 20*unit) > displayW ? -15*unit : 3*unit,
-													  (mousePos.y + 20*unit) > displayH ? -15*unit : 4*unit));
+			ImGui::SetNextWindowPos(mousePos + ImVec2((mousePos.x + 20 * unit) > displayW ? -15 * unit : 3 * unit,
+													  (mousePos.y + 20 * unit) > displayH ? -15 * unit : 4 * unit));
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 										| ImGuiWindowFlags_AlwaysAutoResize;
 
-			ImGui::Begin( "Inspect", nullptr, windowFlags);
+			ImGui::Begin("Inspect", nullptr, windowFlags);
 
-			// TODO: Fix rounding
-			// The pixel pointer is little off when Pixel Aspect !=1.0
-			int x, y;
-			x = (int)(coords.x + planeData.imageOffsetX);
-			y = (int)(coords.y + planeData.imageOffsetY);
-
-			if(planeData.windowMatchData)
+			if (inspectRegionActive)
 			{
-				ImGui::Text("(%d, %d)", x, y);
+				const int selectedWidth = selectionMaxX - selectionMinX + 1;
+				const int selectedHeight = selectionMaxY - selectionMinY + 1;
+				const int displayMinX = selectionMinX + planeData.imageOffsetX;
+				const int displayMinY = selectionMinY + planeData.imageOffsetY;
+				const int displayMaxX = selectionMaxX + planeData.imageOffsetX;
+				const int displayMaxY = selectionMaxY + planeData.imageOffsetY;
+
+				ImGui::Text("Selection: %dx%d", selectedWidth, selectedHeight);
+				if (planeData.windowMatchData)
+				{
+					ImGui::Text("(%d, %d) - (%d, %d)", displayMinX, displayMinY, displayMaxX, displayMaxY);
+				}
+				else
+				{
+					ImGui::Text("Display: (%d, %d) - (%d, %d)", displayMinX, displayMinY, displayMaxX, displayMaxY);
+					ImGui::Text("Data:    (%d, %d) - (%d, %d)",
+								selectionMinX - planeData.windowOffsetX,
+								selectionMinY - planeData.windowOffsetY,
+								selectionMaxX - planeData.windowOffsetX,
+								selectionMaxY - planeData.windowOffsetY);
+				}
 			}
 			else
 			{
-				// Results are not intuitive when Display Window offset applied
-				// Coordinates in Display window are used to access pixel values in OpenImageIO
-				ImGui::Text("Display: (%d, %d)", x, y);
-				ImGui::Text("Data:    (%d, %d)", (int)(coords.x - planeData.windowOffsetX),
-										(int)(coords.y - planeData.windowOffsetY));
+				// TODO: Fix rounding
+				// The pixel pointer is little off when Pixel Aspect !=1.0
+				const int x = static_cast<int>(coords.x + planeData.imageOffsetX);
+				const int y = static_cast<int>(coords.y + planeData.imageOffsetY);
+
+				if (planeData.windowMatchData)
+				{
+					ImGui::Text("(%d, %d)", x, y);
+				}
+				else
+				{
+					// Results are not intuitive when Display Window offset applied
+					// Coordinates in Display window are used to access pixel values in OpenImageIO
+					ImGui::Text("Display: (%d, %d)", x, y);
+					ImGui::Text("Data:    (%d, %d)",
+								static_cast<int>(coords.x - planeData.windowOffsetX),
+								static_cast<int>(coords.y - planeData.windowOffsetY));
+				}
 			}
 
-				if (planeReady >= ImagePlaneData::LOADED)
-				{
-					const int inspectedChannels = std::min(planeData.len, 4);
-					float channelValues[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-					for (int i = 0; i < inspectedChannels; i++)
-						channelValues[i] = planeData.buffer.getchannel(x, y, 0, planeData.begin+i);
+			if (planeReady >= ImagePlaneData::LOADED)
+			{
+				const int inspectedChannels = std::min(planeData.len, 4);
+				float channelValues[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+				int sampledPixels = 0;
 
+				if (inspectRegionActive)
+				{
+					const int selectedWidth = selectionMaxX - selectionMinX + 1;
+					const int selectedHeight = selectionMaxY - selectionMinY + 1;
+					sampledPixels = selectedWidth * selectedHeight;
+					double channelSums[4] = {0.0, 0.0, 0.0, 0.0};
+
+					for (int sampleY = selectionMinY; sampleY <= selectionMaxY; sampleY++)
+					{
+						const int bufferY = sampleY + planeData.imageOffsetY;
+						for (int sampleX = selectionMinX; sampleX <= selectionMaxX; sampleX++)
+						{
+							const int bufferX = sampleX + planeData.imageOffsetX;
+							for (int i = 0; i < inspectedChannels; i++)
+								channelSums[i] += planeData.buffer.getchannel(bufferX, bufferY, 0, planeData.begin + i);
+						}
+					}
+
+					if (sampledPixels > 0)
+					{
+						for (int i = 0; i < inspectedChannels; i++)
+							channelValues[i] = static_cast<float>(channelSums[i] / sampledPixels);
+					}
+
+					ImGui::Text("Average over %d px", sampledPixels);
+				}
+				else if (cursorInsideImage)
+				{
+					const int x = static_cast<int>(coords.x + planeData.imageOffsetX);
+					const int y = static_cast<int>(coords.y + planeData.imageOffsetY);
+					sampledPixels = 1;
+					for (int i = 0; i < inspectedChannels; i++)
+						channelValues[i] = planeData.buffer.getchannel(x, y, 0, planeData.begin + i);
+				}
+
+				if (sampledPixels > 0)
+				{
 					if (inspectedChannels >= 3 && isRgbChannels(planeData.channels))
 					{
 						float hue, saturation, lightness;
@@ -1141,10 +1330,30 @@ void NoPlayer::draw()
 							ImGui::Text("%s: %.4f", planeData.channels.substr(i, 1).c_str(), channelValues[i]);
 					}
 				}
+			}
 
 			ImGui::End();
 			ImGui::PopStyleColor();
 			ImGui::PopStyleVar();
+		}
+
+		const bool showSelection = inspectRegionActive || (inspectRegionDragging && inspectRegionMoved);
+		if (showSelection)
+		{
+			int drawMinX = 0;
+			int drawMinY = 0;
+			int drawMaxX = 0;
+			int drawMaxY = 0;
+			getImageSelectionBounds(inspectRegionStart, inspectRegionEnd, planeData,
+									drawMinX, drawMinY, drawMaxX, drawMaxY);
+
+			const ImVec2 p0 = imageToScreenCoords(ImVec2(static_cast<float>(drawMinX), static_cast<float>(drawMinY)));
+			const ImVec2 p1 = imageToScreenCoords(ImVec2(static_cast<float>(drawMaxX + 1), static_cast<float>(drawMaxY + 1)));
+			const ImVec2 screenMin(std::min(p0.x, p1.x), std::min(p0.y, p1.y));
+			const ImVec2 screenMax(std::max(p0.x, p1.x), std::max(p0.y, p1.y));
+
+			ImDrawList* drawList = ImGui::GetForegroundDrawList();
+			drawList->AddRect(screenMin, screenMax, IM_COL32(255, 210, 80, 220), 0.0f, 0, 1.5f);
 		}
 	}
 
@@ -1158,11 +1367,6 @@ void NoPlayer::draw()
 	if(renderSoloMode)
 	{
 		glUseProgram(shader);
-
-		float centerX =  planeData.imageOffsetX + planeData.imageWidth * 0.5f
-						- planeData.windowOffsetX - planeData.windowWidth * 0.5f;
-		float centerY =  planeData.imageOffsetY + planeData.imageHeight * 0.5f
-						- planeData.windowOffsetY - planeData.windowHeight * 0.5f;
 
 		glUniform2f(glGetUniformLocation(shader, "offset"),  (offsetX - shift.x + centerX * scale * factor * compensateMIP)/(float)displayW,
 															-(offsetY - shift.y + centerY * scale * factor * compensateMIP)/(float)displayH);

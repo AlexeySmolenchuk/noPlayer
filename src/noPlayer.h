@@ -191,6 +191,11 @@ private:
 
 	int channelSoloing = 0;
 	bool inspect = false;
+	bool inspectRegionActive = false;
+	bool inspectRegionDragging = false;
+	bool inspectRegionMoved = false;
+	ImVec2 inspectRegionStart = ImVec2(0.0f, 0.0f);
+	ImVec2 inspectRegionEnd = ImVec2(0.0f, 0.0f);
 
 	bool fullScreen = false;
 
