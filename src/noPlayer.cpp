@@ -3,6 +3,8 @@
 #include <imgui_impl_glfw.h>
 #include <OpenImageIO/imageio.h>
 #include <OpenEXR/OpenEXRConfig.h>
+#include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace
@@ -27,6 +29,65 @@ void releasePlaneTextures(std::vector<ImagePlane>& planes)
 			}
 		}
 	}
+}
+
+bool isRgbChannels(const std::string& channels)
+{
+	if (channels.size() < 3)
+		return false;
+
+	auto isChannel = [](char value, char expected)
+	{
+		return value == expected || value == static_cast<char>(expected - 'a' + 'A');
+	};
+
+	return isChannel(channels[0], 'r')
+		&& isChannel(channels[1], 'g')
+		&& isChannel(channels[2], 'b');
+}
+
+void rgbToHsl(float r, float g, float b, float& h, float& s, float& l)
+{
+	auto sanitize = [](float value)
+	{
+		if (!std::isfinite(value))
+			return 0.0f;
+		return std::clamp(value, 0.0f, 1.0f);
+	};
+
+	r = sanitize(r);
+	g = sanitize(g);
+	b = sanitize(b);
+
+	const float cmax = std::max({r, g, b});
+	const float cmin = std::min({r, g, b});
+	const float delta = cmax - cmin;
+
+	l = (cmax + cmin) * 0.5f;
+
+	if (delta <= std::numeric_limits<float>::epsilon())
+	{
+		h = 0.0f;
+		s = 0.0f;
+		return;
+	}
+
+	s = delta / (1.0f - std::fabs(2.0f * l - 1.0f));
+
+	if (cmax == r)
+		h = std::fmod((g - b) / delta, 6.0f);
+	else if (cmax == g)
+		h = ((b - r) / delta) + 2.0f;
+	else
+		h = ((r - g) / delta) + 4.0f;
+
+	h /= 6.0f;
+	if (h < 0.0f)
+		h += 1.0f;
+
+	h = std::clamp(h, 0.0f, 1.0f);
+	s = std::clamp(s, 0.0f, 1.0f);
+	l = std::clamp(l, 0.0f, 1.0f);
 }
 }
 
@@ -1000,9 +1061,28 @@ void NoPlayer::draw()
 
 				if (planeReady >= ImagePlaneData::LOADED)
 				{
-					for (int i=0; i<planeData.len; i++)
-						ImGui::Text("%s %g",  planeData.channels.substr(i, 1).c_str(),  planeData.buffer.getchannel(x, y, 0, planeData.begin+i));
-			}
+					const int inspectedChannels = std::min(planeData.len, 4);
+					float channelValues[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+					for (int i = 0; i < inspectedChannels; i++)
+						channelValues[i] = planeData.buffer.getchannel(x, y, 0, planeData.begin+i);
+
+					if (inspectedChannels >= 3 && isRgbChannels(planeData.channels))
+					{
+						float hue, saturation, lightness;
+						rgbToHsl(channelValues[0], channelValues[1], channelValues[2], hue, saturation, lightness);
+						ImGui::Text("R: %.4f  H:%.4f", channelValues[0], hue);
+						ImGui::Text("G: %.4f  S:%.4f", channelValues[1], saturation);
+						ImGui::Text("B: %.4f  L:%.4f", channelValues[2], lightness);
+
+						for (int i = 3; i < inspectedChannels; i++)
+							ImGui::Text("%s: %.4f", planeData.channels.substr(i, 1).c_str(), channelValues[i]);
+					}
+					else
+					{
+						for (int i = 0; i < inspectedChannels; i++)
+							ImGui::Text("%s: %.4f", planeData.channels.substr(i, 1).c_str(), channelValues[i]);
+					}
+				}
 
 			ImGui::End();
 			ImGui::PopStyleColor();
