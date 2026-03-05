@@ -2,133 +2,185 @@
 
 #include "imagePlane.h"
 
-#include <string>
-#include <queue>
-#include <condition_variable>
-#include <thread>
-#include <cstdint>
-
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
-
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
-
 #include <OpenImageIO/imagecache.h>
 
+#include <condition_variable>
+#include <cstdint>
+#include <queue>
+#include <string>
+#include <thread>
+
 /**
- * @brief Interactive image viewer application.
+ * @file noPlayer.h
+ * @brief Runtime facade for the interactive viewer application.
+ */
+
+/**
+ * @brief Interactive image viewer application entry object.
  *
- * Manages the GLFW window, ImGui UI, image discovery/loading, and OpenGL
- * rendering. Image loading is performed asynchronously by a worker thread.
+ * @details
+ * Why this class exists:
+ * - Centralizes ownership of window, UI, rendering, OCIO, and async loading state.
+ * - Keeps application entry points and callbacks focused on intent-level operations.
+ *
+ * Where it is used:
+ * - `main` in `application.cpp` creates one instance and drives `init()` and `run()`.
+ * - GLFW/event callbacks in `noPlayer.cpp` forward user actions to this facade.
  */
 class NoPlayer
 {
-
 public:
 	/**
-	 * @brief Create the application window and initialize rendering/UI systems.
+	 * @brief Create window, OpenGL context, ImGui, OCIO shader state, and loader worker.
+	 *
+	 * Called once by `main`.
 	 */
 	NoPlayer();
 
 	/**
-	 * @brief Stop background work and release UI/window resources.
+	 * @brief Stop background work and release all GL/UI resources.
+	 *
+	 * Called when `main` exits.
 	 */
 	~NoPlayer();
 
 	/**
-	 * @brief Load metadata for an image file and queue plane loading.
+	 * @brief Scan and queue one image file for loading.
 	 *
-	 * @param fileName Path to the image file to open.
-	 * @param fresh When true, reset view state (zoom, offsets, active plane/MIP).
+	 * Called by startup path and drop/reload callbacks.
+	 *
+	 * @param fileName Image path.
+	 * @param fresh When `true`, reset view/selection state for a new file.
 	 */
 	void init(const char* fileName, bool fresh = true);
 
 	/**
-	 * @brief Run the main event/render loop until the window is closed.
+	 * @brief Run the event and render loop until window close.
+	 *
+	 * Called by `main`.
 	 */
 	void run();
 
 	/**
-	 * @brief Draw one frame of UI and image content.
+	 * @brief Draw one frame of UI and image output.
+	 *
+	 * Called from `run` and framebuffer callback.
 	 */
 	void draw();
 
 	/**
-	 * @brief Select channel display mode.
-	 * @param idx Channel selector: 0 for combined view, 1..N for individual channels.
+	 * @brief Set active channel-solo mode.
+	 *
+	 * Called by keyboard shortcuts.
+	 *
+	 * @param idx `0` for combined view, `1..7` for channel/derived solo modes.
 	 */
-	void setChannelSoloing(int idx) {channelSoloing = idx;}
+	void setChannelSoloing(int idx) { channelSoloing = idx; }
 
 	/**
-	 * @brief Clear current image state and wait for in-flight loads to finish.
+	 * @brief Clear current file state and wait for in-flight loader work.
+	 *
+	 * Called before opening another image.
 	 */
 	void clear();
 
 	/**
-	 * @brief Get the currently opened image file path.
-	 * @return Current image file path, or an empty string if none is set.
+	 * @brief Current image path for reload and UI display.
+	 *
+	 * Called by keyboard callback.
+	 *
+	 * @return Current image filename or empty string.
 	 */
-	std::string getFileName() {return imageFileName;}
+	std::string getFileName() { return imageFileName; }
 
 private:
 	/**
-	 * @brief Inspect the file and build the in-memory image plane model.
-	 * @return True on success, false when the file cannot be scanned.
+	 * @brief Build logical plane/mip model from file metadata.
+	 *
+	 * Called by `init`.
+	 *
+	 * @return `true` when file scan succeeds.
 	 */
 	bool scanImageFile();
 
 	/**
-	 * @brief Configure OpenColorIO state used during rendering.
+	 * @brief Prepare OCIO processor shader text and LUT textures.
+	 *
+	 * Called during startup. Render path uses generated shader + LUT bindings.
 	 */
 	void configureOCIO();
 
 	/**
-	 * @brief Bind OCIO LUT textures to their configured texture units.
+	 * @brief Bind OCIO LUT textures to their assigned texture units.
+	 *
+	 * Called in draw before the image quad render call.
 	 */
 	void bindOCIOTextures();
 
 	/**
-	 * @brief Release OCIO LUT textures from GPU memory.
+	 * @brief Delete OCIO LUT textures.
+	 *
+	 * Called before rebuilding OCIO state and during shutdown.
 	 */
 	void releaseOCIOTextures();
 
 	/**
-	 * @brief Create the fullscreen quad geometry used for image drawing.
+	 * @brief Create fullscreen quad geometry used by image/frame programs.
+	 *
+	 * Called during startup.
 	 */
 	void createPlane();
 
 	/**
-	 * @brief Compile and attach a shader stage to a program.
-	 * @param program OpenGL program handle.
-	 * @param shaderCode GLSL source code.
-	 * @param type Shader stage type (for example, @c GL_VERTEX_SHADER).
+	 * @brief Compile and attach one shader stage.
+	 *
+	 * Called by `createShaders`.
+	 *
+	 * @param program Program handle receiving the compiled stage.
+	 * @param shaderCode Shader source text.
+	 * @param type GL shader stage enum.
 	 */
 	void addShader(GLuint program, const char* shaderCode, GLenum type);
 
 	/**
-	 * @brief Build and link shader programs used by the renderer.
+	 * @brief Link render programs and assign sampler uniforms.
+	 *
+	 * Called during startup after OCIO shader text is prepared.
 	 */
 	void createShaders();
 
 	/**
-	 * @brief Background worker entry point that loads plane pixels from disk.
+	 * @brief Background loader worker entry point.
+	 *
+	 * Started by constructor, stopped by destructor.
 	 */
 	void loader();
 
 	/**
-	 * @brief Queue an image plane for background loading.
+	 * @brief Queue one plane for async loading.
 	 *
-	 * The caller must hold @c mtx before calling this function.
+	 * Called by run loop while `mtx` is held.
 	 *
-	 * @param plane Plane data to enqueue.
+	 * @param plane Plane payload to queue.
 	 */
 	void enqueueLoadLocked(ImagePlaneData* plane);
 
 	/**
-	 * @brief Work item used by asynchronous loading and texture upload queues.
+	 * @brief Queue record for async load and texture generation.
+	 *
+	 * @details
+	 * Why this struct exists:
+	 * - Couples a plane pointer with queue generation so stale tasks can be ignored.
+	 * - Provides one shared payload type across worker and render handoff queues.
+	 *
+	 * Where it is used:
+	 * - Produced/consumed by `enqueueLoadLocked()`, `loader()`, and `draw()`.
 	 */
 	struct LoadTask
 	{
@@ -137,35 +189,58 @@ private:
 	};
 
 private:
-	GLFWwindow *mainWindow = nullptr;
+	/** GLFW window used by event/render loop. */
+	GLFWwindow* mainWindow = nullptr;
 
+	/** Current opened image path. */
 	std::string imageFileName;
-	unsigned int subimages;
-	unsigned int mips;
+	/** Number of scanned subimages in current file. */
+	unsigned int subimages = 0;
+	/** Total mip count across scanned subimages. */
+	unsigned int mips = 0;
 
+	/** Logical planes for the current file. */
 	std::vector<ImagePlane> imagePlanes;
+	/** Pending CPU load tasks. */
 	std::vector<LoadTask> loadingQueue;
+	/** Completed CPU load tasks waiting for GL upload. */
 	std::queue<LoadTask> textureQueue;
+	/** Mutex guarding loader queues and task states. */
 	std::mutex mtx;
+	/** Loader wakeup/idle condition variable. */
 	std::condition_variable queueCondition;
+	/** Background worker thread for file reads. */
 	std::thread loaderThread;
+	/** Loader shutdown flag set by destructor. */
 	bool loaderStop = false;
+	/** Number of active load tasks in worker. */
 	size_t activeLoads = 0;
+	/** Generation counter used to invalidate stale queued work. */
 	std::uint64_t queueGeneration = 1;
 
-	int activePlaneIdx;
-	int activeMIP;
+	/** Selected logical plane index. */
+	int activePlaneIdx = 0;
+	/** Selected mip index for active plane. */
+	int activeMIP = 0;
 
+	/** Quad VAO for render calls. */
 	GLuint VAO = 0;
+	/** Quad VBO for render calls. */
 	GLuint VBO = 0;
 
+	/** Main image shader program. */
 	GLuint shader = 0;
+	/** Frame-outline shader program. */
 	GLuint frameShader = 0;
 
-	float scale;
-	float offsetX;
-	float offsetY;
+	/** Base zoom scale value. */
+	float scale = 1.0f;
+	/** View offset X in screen space. */
+	float offsetX = 0.25f;
+	/** View offset Y in screen space. */
+	float offsetY = 0.25f;
 
+	/** Vertex shader source for both programs. */
 	std::string vertexShaderCode = R"glsl(
 		#version 330 core
 		layout (location = 0) in vec2 position;
@@ -178,6 +253,7 @@ private:
 		}
 	)glsl";
 
+	/** Default fragment shader source before OCIO replaces it. */
 	std::string fragmentShaderCode = R"glsl(
 		#version 330 core
 		out vec4 FragColor;
@@ -189,7 +265,7 @@ private:
 		}
 	)glsl";
 
-	// outline frame for Display Window
+	/** Frame-outline shader source used for display-window guides. */
 	std::string frameFragmentShaderCode = R"glsl(
 		#version 330 core
 		out vec4 FragColor;
@@ -199,18 +275,38 @@ private:
 		}
 	)glsl";
 
+	/** Active channel solo mode. */
 	int channelSoloing = 0;
+	/** Inspector toggle state. */
 	bool inspect = false;
+	/** Active region-selection state for inspector averaging. */
 	bool inspectRegionActive = false;
+	/** Drag in progress flag for region selection. */
 	bool inspectRegionDragging = false;
+	/** Drag movement threshold result for region selection. */
 	bool inspectRegionMoved = false;
+	/** Region selection start in image-space coordinates. */
 	ImVec2 inspectRegionStart = ImVec2(0.0f, 0.0f);
+	/** Region selection end in image-space coordinates. */
 	ImVec2 inspectRegionEnd = ImVec2(0.0f, 0.0f);
 
+	/** Fullscreen UI mode toggle. */
 	bool fullScreen = false;
+	/** Startup/scan message text shown when no image is loaded. */
+	std::string message;
 
-	std::string message = "";
-
+	/**
+	 * @brief One uploaded OCIO LUT texture binding.
+	 *
+	 * @details
+	 * Why this struct exists:
+	 * - Stores GL id/target/unit and sampler symbol as one binding record.
+	 * - Keeps generated OCIO LUT bindings explicit instead of spreading parallel arrays.
+	 *
+	 * Where it is used:
+	 * - Built by `configureOCIO()`.
+	 * - Consumed by `createShaders()` and `bindOCIOTextures()`.
+	 */
 	struct OcioLutTexture
 	{
 		GLuint id = 0;
@@ -219,7 +315,9 @@ private:
 		std::string samplerName;
 	};
 
+	/** Uploaded OCIO LUT textures required by current OCIO shader program. */
 	std::vector<OcioLutTexture> ocioLutTextures;
 
+	/** Shared OIIO cache used by `ImagePlaneData` load operations. */
 	std::shared_ptr<OIIO::ImageCache> cache;
 };
