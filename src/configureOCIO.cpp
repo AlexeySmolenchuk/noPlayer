@@ -2,10 +2,33 @@
 
 
 #include <OpenColorIO/OpenColorIO.h>
+#include <cstdlib>
+#include <iostream>
+#include <stdexcept>
 namespace OCIO = OCIO_NAMESPACE;
+
+namespace
+{
+GLint interpolationToGlFilter(OCIO::Interpolation interpolation)
+{
+	switch (interpolation)
+	{
+		case OCIO::INTERP_NEAREST:
+			return GL_NEAREST;
+		case OCIO::INTERP_LINEAR:
+		case OCIO::INTERP_TETRAHEDRAL:
+		case OCIO::INTERP_BEST:
+		case OCIO::INTERP_DEFAULT:
+		default:
+			return GL_LINEAR;
+	}
+}
+}
 
 void NoPlayer::configureOCIO()
 {
+	releaseOCIOTextures();
+
 	// std::cout << std::getenv( "OCIO" ) << std::endl;
 
 	// for (int i = 0; i < OCIO::BuiltinConfigRegistry::Get().getNumBuiltinConfigs(); i++)
@@ -16,11 +39,37 @@ void NoPlayer::configureOCIO()
 	// }
 
 	OCIO::ConstConfigRcPtr config;
+	std::string configSource;
 
-	// if(OCIO::IsEnvVariablePresent("OCIO"))
-	// 	config = OCIO::GetCurrentConfig();
-	// else
-		config = OCIO::Config::CreateFromBuiltinConfig(OCIO::BuiltinConfigRegistry::Get().getBuiltinConfigName(0));
+	auto loadBuiltinConfig = [&]()
+	{
+		const char* builtinName = OCIO::BuiltinConfigRegistry::Get().getBuiltinConfigName(0);
+		config = OCIO::Config::CreateFromBuiltinConfig(builtinName);
+		configSource = std::string("builtin: ") + builtinName;
+	};
+
+	const char* ocioPath = std::getenv("OCIO");
+	if (ocioPath && ocioPath[0] != '\0')
+	{
+		try
+		{
+			config = OCIO::Config::CreateFromEnv();
+			config->validate();
+			if (config->getNumDisplays() <= 0)
+				throw std::runtime_error("No displays in OCIO config.");
+			configSource = std::string("env: ") + ocioPath;
+		}
+		catch (const std::exception& exception)
+		{
+			std::cerr << "OCIO: failed to load config from OCIO='" << ocioPath << "' (" << exception.what()
+					<< "). Falling back to built-in config.\n";
+			loadBuiltinConfig();
+		}
+	}
+	else
+	{
+		loadBuiltinConfig();
+	}
 
 
 	std::string g_inputColorSpace;
@@ -30,12 +79,26 @@ void NoPlayer::configureOCIO()
 	OCIO::OptimizationFlags g_optimization{ OCIO::OPTIMIZATION_DEFAULT }; //OPTIMIZATION_DRAFT
 
 	g_display = config->getDefaultDisplay();
+	if (g_display.empty() && config->getNumDisplays() > 0)
+		g_display = config->getDisplay(0);
+
 	g_transformName = config->getDefaultView(g_display.c_str());
+	if (g_transformName.empty() && config->getNumViews(g_display.c_str()) > 0)
+		g_transformName = config->getView(g_display.c_str(), 0);
 
 	// std::cout << "ActiveViews: " << config->getActiveViews() << std::endl;
 
 	g_look = config->getDisplayViewLooks(g_display.c_str(), g_transformName.c_str());
-	g_inputColorSpace = OCIO::ROLE_SCENE_LINEAR;
+	if (config->hasRole(OCIO::ROLE_SCENE_LINEAR))
+		g_inputColorSpace = OCIO::ROLE_SCENE_LINEAR;
+	else if (config->getNumColorSpaces() > 0)
+		g_inputColorSpace = config->getColorSpaceNameByIndex(0);
+	else
+		g_inputColorSpace = OCIO::ROLE_SCENE_LINEAR;
+
+	std::cout << "OCIO: using " << configSource
+			  << ", display='" << g_display
+			  << "', view='" << g_transformName << "'\n";
 
 	// std::cout << "g_display " << g_display << std::endl;
 	// std::cout << "g_transformName " <<  g_transformName << std::endl;
@@ -75,6 +138,97 @@ void NoPlayer::configureOCIO()
 	// Extract the shader information.
 	OCIO::ConstGPUProcessorRcPtr gpu = processor->getOptimizedGPUProcessor(g_optimization);
 	gpu->extractGpuShaderInfo(shaderDesc);
+
+	GLint maxTextureUnits = 0;
+	glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &maxTextureUnits);
+	GLint nextTextureUnit = 1; // unit 0 is reserved for image textureSampler
+
+	auto acquireTextureUnit = [&]() -> GLint
+	{
+		if (nextTextureUnit >= maxTextureUnits)
+			return -1;
+		return nextTextureUnit++;
+	};
+
+	for (unsigned int index = 0; index < shaderDesc->getNumTextures(); index++)
+	{
+		const char* textureName = nullptr;
+		const char* samplerName = nullptr;
+		unsigned int width = 0;
+		unsigned int height = 0;
+		OCIO::GpuShaderDesc::TextureType channel;
+		OCIO::GpuShaderDesc::TextureDimensions dimensions;
+		OCIO::Interpolation interpolation;
+		const float* values = nullptr;
+
+		shaderDesc->getTexture(index, textureName, samplerName, width, height, channel, dimensions, interpolation);
+		shaderDesc->getTextureValues(index, values);
+
+		const GLint unit = acquireTextureUnit();
+		if (unit < 0)
+		{
+			std::cerr << "OCIO: not enough texture units for LUT '" << (textureName ? textureName : "unknown") << "'.\n";
+			break;
+		}
+
+		const GLenum target = (dimensions == OCIO::GpuShaderDesc::TEXTURE_1D) ? GL_TEXTURE_1D : GL_TEXTURE_2D;
+		const GLenum format = (channel == OCIO::GpuShaderDesc::TEXTURE_RED_CHANNEL) ? GL_RED : GL_RGB;
+		const GLint internalFormat = (channel == OCIO::GpuShaderDesc::TEXTURE_RED_CHANNEL) ? GL_R32F : GL_RGB32F;
+		const GLint filter = interpolationToGlFilter(interpolation);
+
+		GLuint textureId = 0;
+		glGenTextures(1, &textureId);
+		glActiveTexture(GL_TEXTURE0 + unit);
+		glBindTexture(target, textureId);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+		glTexParameteri(target, GL_TEXTURE_MIN_FILTER, filter);
+		glTexParameteri(target, GL_TEXTURE_MAG_FILTER, filter);
+		glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		if (target == GL_TEXTURE_2D)
+			glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		if (target == GL_TEXTURE_1D)
+			glTexImage1D(target, 0, internalFormat, width, 0, format, GL_FLOAT, values);
+		else
+			glTexImage2D(target, 0, internalFormat, width, height, 0, format, GL_FLOAT, values);
+
+		ocioLutTextures.push_back({textureId, target, unit, samplerName ? samplerName : ""});
+	}
+
+	for (unsigned int index = 0; index < shaderDesc->getNum3DTextures(); index++)
+	{
+		const char* textureName = nullptr;
+		const char* samplerName = nullptr;
+		unsigned int edgeLen = 0;
+		OCIO::Interpolation interpolation;
+		const float* values = nullptr;
+
+		shaderDesc->get3DTexture(index, textureName, samplerName, edgeLen, interpolation);
+		shaderDesc->get3DTextureValues(index, values);
+
+		const GLint unit = acquireTextureUnit();
+		if (unit < 0)
+		{
+			std::cerr << "OCIO: not enough texture units for 3D LUT '" << (textureName ? textureName : "unknown") << "'.\n";
+			break;
+		}
+
+		GLuint textureId = 0;
+		const GLint filter = interpolationToGlFilter(interpolation);
+		glGenTextures(1, &textureId);
+		glActiveTexture(GL_TEXTURE0 + unit);
+		glBindTexture(GL_TEXTURE_3D, textureId);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, filter);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, filter);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+		glTexImage3D(GL_TEXTURE_3D, 0, GL_RGB32F, edgeLen, edgeLen, edgeLen, 0, GL_RGB, GL_FLOAT, values);
+
+		ocioLutTextures.push_back({textureId, GL_TEXTURE_3D, unit, samplerName ? samplerName : ""});
+	}
+	glActiveTexture(GL_TEXTURE0);
 
 	fragmentShaderCode = R"glsl(#version 330 core
 		out vec4 FragColor;

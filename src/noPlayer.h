@@ -86,6 +86,16 @@ private:
 	void configureOCIO();
 
 	/**
+	 * @brief Bind OCIO LUT textures to their configured texture units.
+	 */
+	void bindOCIOTextures();
+
+	/**
+	 * @brief Release OCIO LUT textures from GPU memory.
+	 */
+	void releaseOCIOTextures();
+
+	/**
 	 * @brief Create the fullscreen quad geometry used for image drawing.
 	 */
 	void createPlane();
@@ -200,6 +210,16 @@ private:
 	bool fullScreen = false;
 
 	std::string message = "";
+
+	struct OcioLutTexture
+	{
+		GLuint id = 0;
+		GLenum target = GL_TEXTURE_2D;
+		GLint unit = 0;
+		std::string samplerName;
+	};
+
+	std::vector<OcioLutTexture> ocioLutTextures;
 
 	std::shared_ptr<OIIO::ImageCache> cache;
 };

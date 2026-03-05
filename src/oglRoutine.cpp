@@ -80,13 +80,30 @@ void NoPlayer::createShaders()
 		return;
 	}
 
+	glUseProgram(shader);
+	{
+		GLint location = glGetUniformLocation(shader, "textureSampler");
+		if (location >= 0)
+			glUniform1i(location, 0);
+
+		for (const OcioLutTexture& texture : ocioLutTextures)
+		{
+			if (texture.samplerName.empty())
+				continue;
+			location = glGetUniformLocation(shader, texture.samplerName.c_str());
+			if (location >= 0)
+				glUniform1i(location, texture.unit);
+		}
+	}
+	glUseProgram(0);
+
+	// Validate after sampler uniforms are assigned to distinct texture units.
 	glValidateProgram(shader);
 	glGetProgramiv(shader, GL_VALIDATE_STATUS, &result);
 	if (!result)
 	{
 		glGetProgramInfoLog(shader, sizeof(log), NULL, log);
-		std::cout << "Error validating program:\n" << log << '\n';
-		return;
+		std::cout << "Warning: shader program validation failed:\n" << log << '\n';
 	}
 
 	frameShader = glCreateProgram();

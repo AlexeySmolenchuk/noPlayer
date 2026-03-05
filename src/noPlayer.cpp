@@ -404,6 +404,31 @@ void NoPlayer::clear()
 }
 
 
+void NoPlayer::bindOCIOTextures()
+{
+	for (const OcioLutTexture& texture : ocioLutTextures)
+	{
+		glActiveTexture(GL_TEXTURE0 + texture.unit);
+		glBindTexture(texture.target, texture.id);
+	}
+	glActiveTexture(GL_TEXTURE0);
+}
+
+
+void NoPlayer::releaseOCIOTextures()
+{
+	for (OcioLutTexture& texture : ocioLutTextures)
+	{
+		if (texture.id != 0)
+		{
+			glDeleteTextures(1, &texture.id);
+			texture.id = 0;
+		}
+	}
+	ocioLutTextures.clear();
+}
+
+
 NoPlayer::~NoPlayer()
 {
 	{
@@ -418,6 +443,7 @@ NoPlayer::~NoPlayer()
 	glfwMakeContextCurrent(mainWindow);
 	{
 		std::lock_guard<std::mutex> lock(mtx);
+		releaseOCIOTextures();
 		releasePlaneTextures(imagePlanes);
 		imagePlanes.clear();
 	}
@@ -1389,7 +1415,9 @@ void NoPlayer::draw()
 
 		glDisable(GL_BLEND);
 		glDisable(GL_DEPTH_TEST); // prevents framebuffer rectangle from being discarded
+		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, planeData.glTexture);
+		bindOCIOTextures();
 		glBindVertexArray(VAO);
 		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 	}
