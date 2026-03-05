@@ -860,6 +860,8 @@ void NoPlayer::draw()
 
 		if (ImGui::IsKeyPressed(ImGuiKey_H))
 			ui = !ui;
+		if (ImGui::IsKeyPressed(ImGuiKey_O))
+			ocioPickerVisible = !ocioPickerVisible;
 
 		if (ImGui::IsKeyPressed(ImGuiKey_0))
 		{
@@ -988,6 +990,7 @@ void NoPlayer::draw()
 				"PgDn          Next MIP\n\n"
 				"F             Fit / 100%%\n\n"
 				"I             Inspect Tool\n\n"
+				"O             OCIO Display/View picker\n\n"
 				"F5            Reload image\n\n"
 				"F11           Fullscreen\n\n"
 				"H             Hide UI\n\n"
@@ -1176,6 +1179,95 @@ void NoPlayer::draw()
 		}
 		ImGui::PopStyleColor(3);
 		ImGui::End();
+
+		if (ocioPickerVisible)
+		{
+			ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(1.0, 1.0, 1.0, 0.2));
+			ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(1.0, 1.0, 1.0, 0.1));
+			ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(1.0, 1.0, 1.0, 0.0));
+
+			// Anchor picker on right-middle side of the screen.
+			const float pickerWidth = 40.0f * unit;
+			const float pickerRightMargin = 4.0f * unit;
+			ImGui::SetNextWindowPos(ImVec2(displayW - pickerRightMargin, displayH * 0.5f), ImGuiCond_Always, ImVec2(1.0f, 0.5f));
+			ImGui::SetNextWindowSizeConstraints(ImVec2(pickerWidth, 0), ImVec2(pickerWidth, displayH - 8 * unit));
+
+			windowFlags = ImGuiWindowFlags_None
+						| ImGuiWindowFlags_NoDecoration
+						| ImGuiWindowFlags_NoNav
+						| ImGuiWindowFlags_AlwaysAutoResize
+						| ImGuiWindowFlags_NoBackground;
+
+			bool rebuildOcio = false;
+			bool selectedDisplayChanged = false;
+			std::string nextDisplay = ocioSelectedDisplay;
+			std::string nextView = ocioSelectedView;
+
+			ImGui::Begin("OCIO Picker", nullptr, windowFlags);
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5, 0.5, 0.5, 1.0f));
+				ImGui::Text("OCIO");
+				if (!ocioConfigSource.empty())
+					ImGui::Text("%s", ocioConfigSource.c_str());
+				ImGui::Text("Displays");
+				for (int index = 0; index < static_cast<int>(ocioDisplays.size()); index++)
+				{
+					const std::string& displayName = ocioDisplays[index];
+					const bool isSelectedDisplay = (ocioSelectedDisplay == displayName);
+					if (isSelectedDisplay)
+						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0, 1.0, 1.0, 1.0f));
+					ImGui::PushID(index);
+					if (ImGui::Selectable(displayName.c_str(), isSelectedDisplay))
+					{
+						nextDisplay = displayName;
+						selectedDisplayChanged = true;
+						rebuildOcio = true;
+					}
+					ImGui::PopID();
+					if (isSelectedDisplay)
+						ImGui::PopStyleColor();
+				}
+
+				ImGui::Text("");
+				ImGui::Text("Views");
+				for (int index = 0; index < static_cast<int>(ocioViews.size()); index++)
+				{
+					const std::string& viewName = ocioViews[index];
+					const bool isSelectedView = (ocioSelectedView == viewName);
+					if (isSelectedView)
+						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0, 1.0, 1.0, 1.0f));
+					ImGui::PushID(static_cast<int>(ocioDisplays.size()) + index);
+					if (ImGui::Selectable(viewName.c_str(), isSelectedView))
+					{
+						nextView = viewName;
+						rebuildOcio = true;
+					}
+					ImGui::PopID();
+					if (isSelectedView)
+						ImGui::PopStyleColor();
+				}
+				ImGui::PopStyleColor();
+			ImGui::End();
+
+			ImGui::PopStyleColor(3);
+
+			// Rebuild OCIO shader + LUT resources after user selection changes.
+			if (rebuildOcio)
+			{
+				if (selectedDisplayChanged)
+				{
+					ocioSelectedDisplay = nextDisplay;
+					// Trigger default/first-view selection for the new display.
+					ocioSelectedView.clear();
+				}
+				else
+				{
+					ocioSelectedDisplay = nextDisplay;
+					ocioSelectedView = nextView;
+				}
+				configureOCIO();
+				createShaders();
+			}
+		}
 
 		{
 			ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.5f, 0.5f, 0.5f, 0.05f));

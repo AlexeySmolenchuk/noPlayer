@@ -62,6 +62,18 @@ void NoPlayer::addShader(GLuint program, const char* shader_code, GLenum type)
 
 void NoPlayer::createShaders()
 {
+	// Recreate programs when OCIO selection changes.
+	if (shader != 0)
+	{
+		glDeleteProgram(shader);
+		shader = 0;
+	}
+	if (frameShader != 0)
+	{
+		glDeleteProgram(frameShader);
+		frameShader = 0;
+	}
+
 	// Build the main image program with OCIO-aware fragment code.
 	shader = glCreateProgram();
 	if(!shader)

@@ -2,6 +2,7 @@
 
 
 #include <OpenColorIO/OpenColorIO.h>
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -65,6 +66,17 @@ void NoPlayer::configureOCIO()
 		loadBuiltinConfig();
 	}
 
+	ocioConfigSource = configSource;
+
+	// Gather available displays from the loaded config.
+	ocioDisplays.clear();
+	for (int index = 0; index < config->getNumDisplays(); index++)
+		ocioDisplays.push_back(config->getDisplay(index));
+
+	auto hasName = [](const std::vector<std::string>& names, const std::string& candidate)
+	{
+		return std::find(names.begin(), names.end(), candidate) != names.end();
+	};
 
 	std::string g_inputColorSpace;
 	std::string g_display;
@@ -72,16 +84,50 @@ void NoPlayer::configureOCIO()
 	std::string g_look;
 	OCIO::OptimizationFlags g_optimization{ OCIO::OPTIMIZATION_DEFAULT };
 
+	// Keep current display when valid, otherwise fall back to config defaults.
+	if (!ocioSelectedDisplay.empty() && hasName(ocioDisplays, ocioSelectedDisplay))
+		g_display = ocioSelectedDisplay;
+	else
+	{
+		g_display = config->getDefaultDisplay();
+		if (!hasName(ocioDisplays, g_display) && !ocioDisplays.empty())
+			g_display = ocioDisplays.front();
+	}
+
+	// Gather views for the selected display.
+	ocioViews.clear();
+	for (int index = 0; index < config->getNumViews(g_display.c_str()); index++)
+		ocioViews.push_back(config->getView(g_display.c_str(), index));
+	if (ocioViews.empty())
+	{
+		// Fall back to the first display that exposes at least one view.
+		for (const std::string& displayName : ocioDisplays)
+		{
+			ocioViews.clear();
+			for (int index = 0; index < config->getNumViews(displayName.c_str()); index++)
+				ocioViews.push_back(config->getView(displayName.c_str(), index));
+			if (!ocioViews.empty())
+			{
+				g_display = displayName;
+				break;
+			}
+		}
+	}
+
+	// Keep current view when valid, otherwise use display default/first view.
+	if (!ocioSelectedView.empty() && hasName(ocioViews, ocioSelectedView))
+		g_transformName = ocioSelectedView;
+	else
+	{
+		g_transformName = config->getDefaultView(g_display.c_str());
+		if (!hasName(ocioViews, g_transformName) && !ocioViews.empty())
+			g_transformName = ocioViews.front();
+	}
+
+	ocioSelectedDisplay = g_display;
+	ocioSelectedView = g_transformName;
+
 	// Select active display and view from the loaded config.
-	g_display = config->getDefaultDisplay();
-	if (g_display.empty() && config->getNumDisplays() > 0)
-		g_display = config->getDisplay(0);
-
-	g_transformName = config->getDefaultView(g_display.c_str());
-	if (g_transformName.empty() && config->getNumViews(g_display.c_str()) > 0)
-		g_transformName = config->getView(g_display.c_str(), 0);
-
-
 	g_look = config->getDisplayViewLooks(g_display.c_str(), g_transformName.c_str());
 	if (config->hasRole(OCIO::ROLE_SCENE_LINEAR))
 		g_inputColorSpace = OCIO::ROLE_SCENE_LINEAR;

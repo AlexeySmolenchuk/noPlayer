@@ -112,7 +112,7 @@ private:
 	/**
 	 * @brief Prepare OCIO processor shader text and LUT textures.
 	 *
-	 * Called during startup. Render path uses generated shader + LUT bindings.
+	 * Called during startup and when OCIO display/view selection changes.
 	 */
 	void configureOCIO();
 
@@ -292,6 +292,8 @@ private:
 
 	/** Fullscreen UI mode toggle. */
 	bool fullScreen = false;
+	/** OCIO display/view picker visibility toggle (shortcut `O`). */
+	bool ocioPickerVisible = false;
 	/** Startup/scan message text shown when no image is loaded. */
 	std::string message;
 
@@ -317,6 +319,16 @@ private:
 
 	/** Uploaded OCIO LUT textures required by current OCIO shader program. */
 	std::vector<OcioLutTexture> ocioLutTextures;
+	/** Label for currently loaded OCIO config source (`env` or `builtin`). */
+	std::string ocioConfigSource;
+	/** Active OCIO display used for shader generation. */
+	std::string ocioSelectedDisplay;
+	/** Active OCIO view used for shader generation. */
+	std::string ocioSelectedView;
+	/** Available OCIO displays from current config. */
+	std::vector<std::string> ocioDisplays;
+	/** Available OCIO views for `ocioSelectedDisplay`. */
+	std::vector<std::string> ocioViews;
 
 	/** Shared OIIO cache used by `ImagePlaneData` load operations. */
 	std::shared_ptr<OIIO::ImageCache> cache;
