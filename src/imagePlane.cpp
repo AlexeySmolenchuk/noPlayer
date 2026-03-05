@@ -8,6 +8,7 @@ bool ImagePlaneData::load()
 {
 	using namespace OIIO;
 
+	// Define fallback pixel value for missing tiles/regions.
 	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };
 	OIIO::attribute ("missingcolor", TypeDesc("float[4]"), &missing);
 
@@ -21,12 +22,12 @@ bool ImagePlaneData::load()
 
 	pixels = std::shared_ptr<precision[]>(new precision[imageWidth * imageHeight * len]);
 
+	// Keep an ImageBuf for raw-value inspection and range calculations.
 	buffer = ImageBuf(imageFileName, subimage, mip, cache);
 
-	// Preload first imagePlane
 	if (begin==0)
 	{
-		// Keep ImageBuf data in source precision for inspection/measurement.
+		// Preload the first channel group so ImageBuf has source-precision data.
 		bool ok = buffer.read(subimage, mip, begin, begin + len, true, TypeDesc::UNKNOWN);
 		if (!ok)
 			std::cout << buffer.geterror() << std::endl;
@@ -37,29 +38,12 @@ bool ImagePlaneData::load()
 	roi.chbegin = begin;
 	roi.chend = begin + len;
 	
+	// Extract the selected channels into a contiguous buffer for GL upload.
 	bool ok = buffer.get_pixels(roi, TypeDesc::PRECISION, &pixels[0]);
 	if (!ok)
 		std::cout << buffer.geterror() << std::endl;
 
-	// cache->get_pixels(ustring(imageFileName), subimage, mip, 0, imageWidth, 0, imageHeight, 0, 1, begin, begin + len, TypeDesc::PRECISION, &pixels[0]);
 
-	// if (! inp->read_image( subimage,
-	// 						mip,
-	// 						begin,
-	// 						begin + len,
-	// 						TypeDesc::PRECISION,
-	// 						&pixels[0]))
-	// {
-	// 	std::cerr << "Could not read pixels from " << imageFileName
-	// 			<< ", error = " << inp->geterror() << "\n";
-	// 	return;
-	// }
-	// if (! inp->close ())
-	// {
-	// 	std::cerr << "Error closing " << imageFileName
-	// 			<< ", error = " << inp->geterror() << "\n";
-	// 	return;
-	// }
 
 	return ok;
 }
@@ -68,6 +52,7 @@ bool ImagePlaneData::load()
 template<typename BUFT>
 static void getRange_impl(ImagePlaneData *plane, float *minimum, float *maximum)
 {
+	// Walk source pixels and update per-channel min/max values.
 	for (OIIO::ImageBuf::ConstIterator<BUFT> it(plane->buffer); !it.done(); ++it)
 	{
 		int i = 0;
@@ -83,6 +68,7 @@ static void getRange_impl(ImagePlaneData *plane, float *minimum, float *maximum)
 
 void ImagePlaneData::getRange(float *minimum, float *maximum)
 {
+	// Initialize range accumulators before scanning the image.
 	for (int i = 0; i < len; i++)
 	{
 		minimum[i] = std::numeric_limits<float>::max();
@@ -111,31 +97,29 @@ bool ImagePlaneData::generateGlTexture()
 		return false;
 	}
 
+	// Configure alignment for half/float texture uploads.
 	glPixelStorei(GL_PACK_ALIGNMENT, 2);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
 
 	if (glTexture != 0)
 		glDeleteTextures(1, &glTexture);
 
-	// Create an OpenGL texture identifier
+	// Create and configure a texture object for this plane payload.
 	glGenTextures(1, &glTexture);
 	glBindTexture(GL_TEXTURE_2D, glTexture);
 
-	// Setup filtering parameters for display
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	// glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	int dataFormats[] = {0, GL_RED, GL_RG, GL_RGB, GL_RGBA};
 
+	// Upload packed channel data using the chosen internal precision mode.
 	glTexImage2D(GL_TEXTURE_2D, 0, internalFormats[len],
 					imageWidth, imageHeight, 0,
 					dataFormats[len], PRECISION_GL,
 					&pixels[0]);
 
-	// std::cout << glGetError() << std::endl;	
 	return true;
 }

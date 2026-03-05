@@ -27,27 +27,21 @@ GLint interpolationToGlFilter(OCIO::Interpolation interpolation)
 
 void NoPlayer::configureOCIO()
 {
+	// Reset previously uploaded LUT textures before rebuilding OCIO state.
 	releaseOCIOTextures();
-
-	// std::cout << std::getenv( "OCIO" ) << std::endl;
-
-	// for (int i = 0; i < OCIO::BuiltinConfigRegistry::Get().getNumBuiltinConfigs(); i++)
-	// {
-	// 	std::cout <<
-	// 	OCIO::BuiltinConfigRegistry::Get().getBuiltinConfigName(i)
-	// 	<< std::endl;
-	// }
 
 	OCIO::ConstConfigRcPtr config;
 	std::string configSource;
 
 	auto loadBuiltinConfig = [&]()
 	{
+		// Use a deterministic builtin profile when no external config is available.
 		const char* builtinName = OCIO::BuiltinConfigRegistry::Get().getBuiltinConfigName(0);
 		config = OCIO::Config::CreateFromBuiltinConfig(builtinName);
 		configSource = std::string("builtin: ") + builtinName;
 	};
 
+	// Prefer OCIO environment config so user/project color management is respected.
 	const char* ocioPath = std::getenv("OCIO");
 	if (ocioPath && ocioPath[0] != '\0')
 	{
@@ -76,8 +70,9 @@ void NoPlayer::configureOCIO()
 	std::string g_display;
 	std::string g_transformName;
 	std::string g_look;
-	OCIO::OptimizationFlags g_optimization{ OCIO::OPTIMIZATION_DEFAULT }; //OPTIMIZATION_DRAFT
+	OCIO::OptimizationFlags g_optimization{ OCIO::OPTIMIZATION_DEFAULT };
 
+	// Select active display and view from the loaded config.
 	g_display = config->getDefaultDisplay();
 	if (g_display.empty() && config->getNumDisplays() > 0)
 		g_display = config->getDisplay(0);
@@ -86,7 +81,6 @@ void NoPlayer::configureOCIO()
 	if (g_transformName.empty() && config->getNumViews(g_display.c_str()) > 0)
 		g_transformName = config->getView(g_display.c_str(), 0);
 
-	// std::cout << "ActiveViews: " << config->getActiveViews() << std::endl;
 
 	g_look = config->getDisplayViewLooks(g_display.c_str(), g_transformName.c_str());
 	if (config->hasRole(OCIO::ROLE_SCENE_LINEAR))
@@ -96,20 +90,12 @@ void NoPlayer::configureOCIO()
 	else
 		g_inputColorSpace = OCIO::ROLE_SCENE_LINEAR;
 
+	// Print selected OCIO source and display/view for runtime diagnostics.
 	std::cout << "OCIO: using " << configSource
 			  << ", display='" << g_display
 			  << "', view='" << g_transformName << "'\n";
 
-	// std::cout << "g_display " << g_display << std::endl;
-	// std::cout << "g_transformName " <<  g_transformName << std::endl;
-	// std::cout << "g_look " << g_look << std::endl;
 
-	// for (int i = 0; i < config->getNumViews(g_display.c_str()); i++)
-	// {
-	// 	std::cout <<
-	// 	config->getView(g_display.c_str(), i)
-	// 	<< std::endl;
-	// }
 
 	OCIO::DisplayViewTransformRcPtr transform = OCIO::DisplayViewTransform::Create();
 	transform->setSrc( g_inputColorSpace.c_str() );
@@ -121,35 +107,32 @@ void NoPlayer::configureOCIO()
 	vp->setLooksOverrideEnabled(true);
 	vp->setLooksOverride(g_look.c_str());
 
-	// auto ect = OCIO::ExposureContrastTransform::Create();
-	// ect->setStyle(OCIO::EXPOSURE_CONTRAST_LOGARITHMIC);
-	// ect->makeExposureDynamic();
-	// vp->setLinearCC(ect);
-
+	// Build one processor describing scene-linear to display-view conversion.
 	OCIO::ConstProcessorRcPtr processor;
 	processor = vp->getProcessor(config, config->getCurrentContext());
 
-	// Set the shader context.
 	OCIO::GpuShaderDescRcPtr shaderDesc = OCIO::GpuShaderDesc::CreateShaderDesc();
 	shaderDesc->setLanguage(OCIO::GPU_LANGUAGE_GLSL_1_3);
 	shaderDesc->setFunctionName("OCIODisplay");
 	shaderDesc->setResourcePrefix("ocio_");
 
-	// Extract the shader information.
+	// Generate shader text and LUT resources needed for the selected processor.
 	OCIO::ConstGPUProcessorRcPtr gpu = processor->getOptimizedGPUProcessor(g_optimization);
 	gpu->extractGpuShaderInfo(shaderDesc);
 
 	GLint maxTextureUnits = 0;
 	glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &maxTextureUnits);
-	GLint nextTextureUnit = 1; // unit 0 is reserved for image textureSampler
+	GLint nextTextureUnit = 1;
 
 	auto acquireTextureUnit = [&]() -> GLint
 	{
+		// Reserve texture unit 0 for the image texture sampler.
 		if (nextTextureUnit >= maxTextureUnits)
 			return -1;
 		return nextTextureUnit++;
 	};
 
+	// Upload all OCIO 1D/2D LUT textures requested by the generated shader.
 	for (unsigned int index = 0; index < shaderDesc->getNumTextures(); index++)
 	{
 		const char* textureName = nullptr;
@@ -195,6 +178,7 @@ void NoPlayer::configureOCIO()
 		ocioLutTextures.push_back({textureId, target, unit, samplerName ? samplerName : ""});
 	}
 
+	// Upload all OCIO 3D LUT textures requested by the generated shader.
 	for (unsigned int index = 0; index < shaderDesc->getNum3DTextures(); index++)
 	{
 		const char* textureName = nullptr;
@@ -228,8 +212,10 @@ void NoPlayer::configureOCIO()
 
 		ocioLutTextures.push_back({textureId, GL_TEXTURE_3D, unit, samplerName ? samplerName : ""});
 	}
+	// Restore default active texture unit for the main render path.
 	glActiveTexture(GL_TEXTURE0);
 
+	// Rebuild fragment shader source with embedded OCIO function code.
 	fragmentShaderCode = R"glsl(#version 330 core
 		out vec4 FragColor;
 		in vec2 texCoords;
@@ -357,8 +343,5 @@ void NoPlayer::configureOCIO()
 		}
 	)glsl";
 
-	// std::cout << shaderDesc->getShaderText() << std::endl;
 
-	// std::cout << "Num3DTextures:  " << shaderDesc->getNum3DTextures() << std::endl;
-	// std::cout << "tNumTextures:" << shaderDesc->getNumTextures() << std::endl;
 }

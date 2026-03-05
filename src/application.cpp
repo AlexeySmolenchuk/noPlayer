@@ -2,7 +2,7 @@
 
 int main(int argc, char**argv)
 {
-
+	// Create application instance and run until window close.
 	NoPlayer noPlayerApp;
 
 	if (argc > 1)

@@ -3,6 +3,7 @@
 
 bool NoPlayer::scanImageFile()
 {
+	// Reset counters before scanning a new file.
 	subimages = 0;
 	mips = 0;
 
@@ -18,12 +19,14 @@ bool NoPlayer::scanImageFile()
 	}
 
 	const std::vector<std::string> predefined = {"RGBA", "XYZ", "UV", "rgba", "xyz", "uv"};
-	std::vector<ImagePlaneData> imagePlanesFlattened; // Flattened data will be organized by names after reading
+	// Build a flat list first, then regroup into logical AOV planes.
+	std::vector<ImagePlaneData> imagePlanesFlattened;
 	bool truncatedChannels = false;
 	
 	int mip = 0;
 	while (inp->seek_subimage(subimages, mip))
 	{
+		// Iterate all mips for the current subimage.
 		while (inp->seek_subimage(subimages, mip))
 		{
 			int count = 0;
@@ -41,15 +44,13 @@ bool NoPlayer::scanImageFile()
 				auto name = spec.channel_name(i);
 				size_t pos = name.find_last_of('.');
 
-				// Grouping for non "dot" separated names
 				if (pos == std::string::npos)
 				{
+					// Group non-dotted channels using common predefined packs.
 					bool groupFound = false;
 
-					// loop through predefined names
 					for (int n = 0; n < predefined.size(); n++)
 					{
-						// Search if current channel e.g. "G" is part of predefined "RGBA"
 						if (predefined[n].find(name) != std::string::npos)
 						{
 							if (!isCreated[n])
@@ -77,7 +78,6 @@ bool NoPlayer::scanImageFile()
 								isCreated[n] = true;
 							}
 
-							// Fill additional information for already created plane
 							imagePlanesFlattened.back().channels += name;
 							imagePlanesFlattened.back().len++;
 							groupFound = true;
@@ -85,9 +85,9 @@ bool NoPlayer::scanImageFile()
 						}
 					}
 
-					// can't group automatically
 					if (!groupFound)
 					{
+						// Fallback to one-channel logical planes when no group matches.
 						ImagePlaneData &plane = imagePlanesFlattened.emplace_back();
 						plane.imageFileName = imageFileName;
 						plane.subimage = subimages;
@@ -110,8 +110,9 @@ bool NoPlayer::scanImageFile()
 						plane.windowOffsetY = spec.full_y;
 					}
 				}
-				else // Grouping for "dot" separated names
+				else
 				{
+					// Group dotted channels by their group prefix.
 					auto channel_group = name.substr(0, pos);
 					if ((count == 0) || (imagePlanesFlattened.back().groupName != channel_group))
 					{
@@ -140,6 +141,7 @@ bool NoPlayer::scanImageFile()
 				}
 
 				ImagePlaneData &plane = imagePlanesFlattened.back();
+				// Copy per-plane metadata used by UI, transforms, and loading.
 				plane.windowMatchData = windowMatchData;
 				plane.pixelAspect = spec.get_float_attribute("PixelAspectRatio", 1.0);
 				plane.compression = spec.decode_compression_metadata().first;
@@ -157,6 +159,7 @@ bool NoPlayer::scanImageFile()
 
 	for (ImagePlaneData &planeData : imagePlanesFlattened)
 	{
+		// Limit rendering to the first 4 channels per plane.
 		if (planeData.len > 4)
 		{
 			planeData.len = 4;
@@ -168,12 +171,13 @@ bool NoPlayer::scanImageFile()
 
 	if (truncatedChannels)
 	{
+		// Surface channel truncation to the startup message panel.
 		if (!message.empty())
 			message += "\n";
 		message += "Some channel groups have more than 4 channels. Display is limited to the first 4 channels.";
 	}
 
-	// Store all image planes to the name based structure
+	// Collapse flattened entries into logical AOV planes keyed by name/group/channels.
 	std::unordered_map<std::string, size_t> map;
 
 	for (ImagePlaneData planeData: imagePlanesFlattened)
@@ -200,7 +204,7 @@ bool NoPlayer::scanImageFile()
 			plane.channels = planeData.channels;
 			plane.nMIPs = 0;
 
-			// By default apply OCIO only for non integer RGB (not xyz) channels
+			// Enable OCIO by default for float/half RGB-family planes.
 			if ((planeData.channels == "RGB") || (planeData.channels == "RGBA") || (planeData.channels == "rgb") || (planeData.channels == "rgba"))
 				if ((planeData.format == "half") || (planeData.format == "float"))
 					plane.doOCIO = true;
@@ -212,25 +216,6 @@ bool NoPlayer::scanImageFile()
 		imagePlanes[idx].MIPs.emplace_back(planeData);
 		imagePlanes[idx].nMIPs++;
 	}
-
-
-	// for (auto plane: imagePlanesFlattened)
-	// {
-	// 	std::cout <<
-	// 	plane.subimage << " " <<
-	// 	plane.mip << " " <<
-	// 	plane.name << " " <<
-	// 	plane.groupName << " " <<
-	// 	plane.channels << " " <<
-	// 	plane.format << " " <<
-	// 	plane.begin << " " <<
-	// 	plane.len << std::endl;
-	// }
-
-	// std::cout << "Subimages: " << subimage << std::endl;
-	// std::cout << "MIPs: " << mips << std::endl;
-
-	// std::cout << spec.serialize(ImageSpec::SerialText) << std::endl;
 
 	return true;
 }

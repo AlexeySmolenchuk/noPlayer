@@ -3,6 +3,7 @@
 
 void NoPlayer::createPlane()
 {
+	// Define a unit quad used by both image and frame render passes.
 	GLfloat vertices[] = {
 		0.0f, 0.0f,
 		0.0f, 1.0f,
@@ -20,6 +21,7 @@ void NoPlayer::createPlane()
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
 	glEnableVertexAttribArray(0);
 
+	// Leave a clean GL state after VAO/VBO setup.
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
 
@@ -28,6 +30,7 @@ void NoPlayer::createPlane()
 
 void NoPlayer::addShader(GLuint program, const char* shader_code, GLenum type)
 {
+	// Compile one shader stage from source text.
 	GLuint current_shader = glCreateShader(type);
 
 	const GLchar* code[1];
@@ -52,12 +55,14 @@ void NoPlayer::addShader(GLuint program, const char* shader_code, GLenum type)
 	}
 
 	glAttachShader(program, current_shader);
+	// Shader object can be deleted after being attached to the program.
 	glDeleteShader(current_shader);
 }
 
 
 void NoPlayer::createShaders()
 {
+	// Build the main image program with OCIO-aware fragment code.
 	shader = glCreateProgram();
 	if(!shader)
 	{
@@ -82,6 +87,7 @@ void NoPlayer::createShaders()
 
 	glUseProgram(shader);
 	{
+		// Bind the image sampler to texture unit 0.
 		GLint location = glGetUniformLocation(shader, "textureSampler");
 		if (location >= 0)
 			glUniform1i(location, 0);
@@ -97,7 +103,7 @@ void NoPlayer::createShaders()
 	}
 	glUseProgram(0);
 
-	// Validate after sampler uniforms are assigned to distinct texture units.
+	// Validate after sampler units are assigned to avoid sampler-type conflicts.
 	glValidateProgram(shader);
 	glGetProgramiv(shader, GL_VALIDATE_STATUS, &result);
 	if (!result)
@@ -106,6 +112,7 @@ void NoPlayer::createShaders()
 		std::cout << "Warning: shader program validation failed:\n" << log << '\n';
 	}
 
+	// Build the frame-outline program used for display-window guides.
 	frameShader = glCreateProgram();
 	if(!frameShader)
 	{

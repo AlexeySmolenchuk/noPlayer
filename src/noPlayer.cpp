@@ -20,6 +20,7 @@ constexpr int SOLO_A = 7;
 
 int clampMipIndexForPlane(const ImagePlane& plane, int mipIndex)
 {
+	// Keep active mip index in the valid range for the selected plane.
 	if (plane.MIPs.empty())
 		return 0;
 	return std::clamp(mipIndex, 0, static_cast<int>(plane.MIPs.size()) - 1);
@@ -27,6 +28,7 @@ int clampMipIndexForPlane(const ImagePlane& plane, int mipIndex)
 
 void releasePlaneTextures(std::vector<ImagePlane>& planes)
 {
+	// Delete all GPU textures currently owned by plane payloads.
 	for (ImagePlane& plane : planes)
 	{
 		for (ImagePlaneData& mip : plane.MIPs)
@@ -42,6 +44,7 @@ void releasePlaneTextures(std::vector<ImagePlane>& planes)
 
 bool isRgbChannels(const std::string& channels)
 {
+	// Treat both lower and upper case channel labels as RGB.
 	if (channels.size() < 3)
 		return false;
 
@@ -62,6 +65,7 @@ bool isHslSolo(int mode)
 
 bool canRenderSoloMode(int mode, const ImagePlaneData& plane)
 {
+	// Guard solo modes against incompatible channel layouts.
 	if (mode == SOLO_NONE)
 		return true;
 
@@ -79,6 +83,7 @@ bool canRenderSoloMode(int mode, const ImagePlaneData& plane)
 
 void rgbToHsl(float r, float g, float b, float& h, float& s, float& l)
 {
+	// Convert raw RGB values to normalized hue plus unconstrained S/L.
 	auto sanitize = [](float value)
 	{
 		if (!std::isfinite(value))
@@ -125,6 +130,7 @@ void rgbToHsl(float r, float g, float b, float& h, float& s, float& l)
 
 bool isPointInsideImage(const ImVec2& coords, const ImagePlaneData& planeData)
 {
+	// Check if image-space coordinates land inside the data window.
 	return coords.x >= 0.0f
 		&& coords.x < static_cast<float>(planeData.imageWidth)
 		&& coords.y >= 0.0f
@@ -133,6 +139,7 @@ bool isPointInsideImage(const ImVec2& coords, const ImagePlaneData& planeData)
 
 ImVec2 clampImageCoords(const ImVec2& coords, const ImagePlaneData& planeData)
 {
+	// Clamp image-space coordinates to the valid sampling domain.
 	const float maxX = std::max(0.0f, static_cast<float>(planeData.imageWidth) - 0.0001f);
 	const float maxY = std::max(0.0f, static_cast<float>(planeData.imageHeight) - 0.0001f);
 	return ImVec2(std::clamp(coords.x, 0.0f, maxX), std::clamp(coords.y, 0.0f, maxY));
@@ -141,6 +148,7 @@ ImVec2 clampImageCoords(const ImVec2& coords, const ImagePlaneData& planeData)
 void getImageSelectionBounds(const ImVec2& start, const ImVec2& end, const ImagePlaneData& planeData,
 							int& minX, int& minY, int& maxX, int& maxY)
 {
+	// Convert drag endpoints into integer pixel bounds.
 	if (planeData.imageWidth == 0 || planeData.imageHeight == 0)
 	{
 		minX = maxX = 0;
@@ -168,9 +176,7 @@ void getImageSelectionBounds(const ImVec2& start, const ImVec2& end, const Image
 
 void dropCallback(GLFWwindow* window, int count, const char** paths)
 {
-    // for (int i = 0;  i < count;  i++)
-    //     std::cout << paths[i] << std::endl;
-
+	// Replace current image with the first dropped path.
 	NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(window));
 	view->clear();
 	view->init(paths[0]);
@@ -179,9 +185,7 @@ void dropCallback(GLFWwindow* window, int count, const char** paths)
 
 void framebufferSizeCallback(GLFWwindow* window, int width, int height)
 {
-	// make sure the viewport matches the new window dimensions; note that width and
-	// height will be significantly larger than specified on retina displays.
-	// glViewport(0, 0, width, height);
+	// Trigger redraw when framebuffer size changes.
 	NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(window));
 	view->draw();
 }
@@ -189,6 +193,7 @@ void framebufferSizeCallback(GLFWwindow* window, int width, int height)
 
 GLFWmonitor* getCurrentMonitor(GLFWwindow *window)
 {
+	// Select monitor with the largest overlap to current window bounds.
 	int nmonitors, i;
 	int wx, wy, ww, wh;
 	int mx, my, mw, mh;
@@ -228,7 +233,7 @@ GLFWmonitor* getCurrentMonitor(GLFWwindow *window)
 
 void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int mods)
 {
-	// FullScreen Mode
+	// Toggle fullscreen on F11.
 	if (key == GLFW_KEY_F11 && action == GLFW_PRESS)
 	{
 		if ( glfwGetKey( mainWindow, GLFW_KEY_F11 ) == GLFW_PRESS )
@@ -265,7 +270,7 @@ void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int 
 
 	if ( glfwGetKey( mainWindow, GLFW_KEY_F5 ) == GLFW_PRESS )
 	{
-		// TODO: more elegant reload, preserving per-imageplane settings
+		// Reload current file while preserving per-plane state where possible.
 		NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(mainWindow));
 		std::string currentFileName = view->getFileName();
 		if (!currentFileName.empty())
@@ -282,6 +287,7 @@ void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int 
 
 NoPlayer::NoPlayer()
 {
+	// Initialize windowing and OpenGL context.
 	if (!glfwInit())
 	{
 		std::cout << "GLFW initialisation failed!\n";
@@ -294,7 +300,6 @@ NoPlayer::NoPlayer()
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
-	// Create the window
 	mainWindow = glfwCreateWindow(1280, 720, "noPlayer ", nullptr, nullptr);
 	if (!mainWindow)
 	{
@@ -303,7 +308,7 @@ NoPlayer::NoPlayer()
 		std::exit(1);
 	}
 
-	// Helper pointer to run callbacks
+	// Wire GLFW callbacks to the NoPlayer instance.
 	glfwSetWindowUserPointer(mainWindow, this);
 	glfwSetFramebufferSizeCallback(mainWindow, framebufferSizeCallback);
 	glfwSetKeyCallback(mainWindow, keyCallback);
@@ -324,6 +329,7 @@ NoPlayer::NoPlayer()
 
 	glViewport(0, 0, bufferWidth, bufferHeight);
 
+	// Initialize ImGui backends for GLFW/OpenGL.
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
@@ -335,16 +341,19 @@ NoPlayer::NoPlayer()
 	ImGui_ImplGlfw_InitForOpenGL(mainWindow, true);
 	ImGui_ImplOpenGL3_Init("#version 330");
 
+	// Build rendering resources and OCIO shader source.
 	configureOCIO();
 
 	createPlane();
 	createShaders();
 
+	// Configure shared OIIO cache used by async loaders.
 	using namespace OIIO;
 	cache = ImageCache::create ();
 	cache->attribute ("max_memory_MB", 8000.0f);
 	cache->attribute ("autotile", 64);
 
+	// Start background loading worker.
 	loaderThread = std::thread(&NoPlayer::loader, this);
 };
 
@@ -352,16 +361,17 @@ NoPlayer::NoPlayer()
 void
 NoPlayer::init(const char* fileName, bool fresh)
 {
+	// Scan file metadata and rebuild plane model.
 	imageFileName = fileName;
 	if (!scanImageFile())
 		return;
 
 	if (fresh)
 	{
+		// Reset navigation and selection state for a fresh file load.
 		scale = 1.f;
-		// With this little offset we can align image and screen pixels for even and odd resolutions
-		offsetX = 0.25f; // Offset of viewed image
-		offsetY = 0.25f; // Offset of viewed image
+		offsetX = 0.25f;
+		offsetY = 0.25f;
 		channelSoloing = 0;
 		activePlaneIdx = 0;
 		activeMIP = 0;
@@ -370,9 +380,9 @@ NoPlayer::init(const char* fileName, bool fresh)
 		inspectRegionMoved = false;
 	}
 
-	// Preload
 	std::unique_lock<std::mutex> lock(mtx);
 	loadingQueue.clear();
+	// Queue all mips so first draw can progressively resolve textures.
 	for(auto ip = imagePlanes.rbegin(); ip != imagePlanes.rend(); ++ip)
 	{
 		for(auto mip = ip->MIPs.rbegin(); mip != ip->MIPs.rend(); ++mip)
@@ -387,7 +397,7 @@ void NoPlayer::clear()
 {
 	std::unique_lock<std::mutex> lock(mtx);
 
-	// Invalidate queued work and wait until the worker is done with any in-flight load.
+	// Invalidate queued tasks and wait for active loads to finish.
 	queueGeneration++;
 	loadingQueue.clear();
 	while (!textureQueue.empty())
@@ -406,6 +416,7 @@ void NoPlayer::clear()
 
 void NoPlayer::bindOCIOTextures()
 {
+	// Bind each uploaded OCIO LUT texture to its assigned unit.
 	for (const OcioLutTexture& texture : ocioLutTextures)
 	{
 		glActiveTexture(GL_TEXTURE0 + texture.unit);
@@ -417,6 +428,7 @@ void NoPlayer::bindOCIOTextures()
 
 void NoPlayer::releaseOCIOTextures()
 {
+	// Delete uploaded OCIO LUT textures and reset container state.
 	for (OcioLutTexture& texture : ocioLutTextures)
 	{
 		if (texture.id != 0)
@@ -431,6 +443,7 @@ void NoPlayer::releaseOCIOTextures()
 
 NoPlayer::~NoPlayer()
 {
+	// Signal worker shutdown and wait for thread exit.
 	{
 		std::lock_guard<std::mutex> lock(mtx);
 		loaderStop = true;
@@ -442,6 +455,7 @@ NoPlayer::~NoPlayer()
 
 	glfwMakeContextCurrent(mainWindow);
 	{
+		// Free OCIO LUTs and image textures while context is active.
 		std::lock_guard<std::mutex> lock(mtx);
 		releaseOCIOTextures();
 		releasePlaneTextures(imagePlanes);
@@ -479,6 +493,7 @@ NoPlayer::~NoPlayer()
 
 void NoPlayer::enqueueLoadLocked(ImagePlaneData* plane)
 {
+	// Skip invalid, duplicate, or already-issued tasks.
 	if (plane == nullptr)
 		return;
 
@@ -492,14 +507,15 @@ void NoPlayer::enqueueLoadLocked(ImagePlaneData* plane)
 	}
 
 	loadingQueue.push_back({plane, queueGeneration});
+	// Mark as issued and wake worker.
 	plane->ready = ImagePlaneData::ISSUED;
 	queueCondition.notify_one();
 }
 
 
-// Helper process, loading data from queue
 void NoPlayer::loader()
 {
+	// Pop queued work, load pixels, and forward completed planes for GL upload.
 	while (true)
 	{
 		LoadTask task;
@@ -546,6 +562,7 @@ void NoPlayer::loader()
 
 void NoPlayer::run()
 {
+	// Poll events, draw frames, and keep preload queues moving.
 	while (!glfwWindowShouldClose(mainWindow))
 	{
 		if (glfwGetWindowAttrib(mainWindow, GLFW_VISIBLE))
@@ -577,7 +594,6 @@ void NoPlayer::run()
 			{
 				std::unique_lock<std::mutex> lock(mtx);
 
-				// we can preload next AOV
 				int next = (activePlaneIdx + 1)%imagePlanes.size();
 				int nextMipForPlane = clampMipIndexForPlane(imagePlanes[next], activeMIP);
 				if (imagePlanes[next].MIPs[nextMipForPlane].ready == ImagePlaneData::NOT_ISSUED)
@@ -585,7 +601,6 @@ void NoPlayer::run()
 					enqueueLoadLocked(&imagePlanes[next].MIPs[nextMipForPlane]);
 				}
 
-				// preload next MIP
 				int nextMIP = (activeMIP + 1) % imagePlanes[activePlaneIdx].MIPs.size();
 				if (imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == ImagePlaneData::NOT_ISSUED)
 				{
@@ -593,13 +608,7 @@ void NoPlayer::run()
 				}
 			}
 
-			// Generate texture for current imagePlane
-			// if ( plane.ready == ImagePlaneData::LOADED)
-			// {
-			// 	plane.generateGlTexture();
-			// }
 
-			// Generate texture for imagePlane from the Queue
 			LoadTask finishedTask;
 			{
 				std::lock_guard<std::mutex> lock(mtx);
@@ -625,6 +634,7 @@ void NoPlayer::run()
 
 void NoPlayer::draw()
 {
+	// Start a new ImGui/OpenGL frame.
 	ImGui_ImplOpenGL3_NewFrame();
 	ImGui_ImplGlfw_NewFrame();
 
@@ -643,6 +653,7 @@ void NoPlayer::draw()
 	
 	if (imagePlanes.size() == 0)
 	{
+		// Show startup info and drop hint when no image is loaded.
 		{
 			ImGui::SetNextWindowPos(ImVec2(unit, unit));
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
@@ -657,7 +668,6 @@ void NoPlayer::draw()
 			ImGui::Text((const char *)glGetString(GL_VERSION));
 			ImGui::Text("");
 
-			// This is OK only for static linking
 			ImGui::Text("OpenImageIO " OIIO_VERSION_STRING);
 			ImGui::Text(OPENEXR_PACKAGE_STRING);
 
@@ -709,6 +719,7 @@ void NoPlayer::draw()
 
 	auto screenToImageCoords = [&](const ImVec2& screenCoords)
 	{
+		// Map cursor position from screen-space into image-space.
 		ImVec2 imageCoords = screenCoords - ImVec2(displayW, displayH) * 0.5f - ImVec2(offsetX, offsetY) + shift;
 		imageCoords /= ImVec2(planeData.pixelAspect, 1.0f) * scale * compensateMIP * factor;
 		imageCoords += ImVec2(planeData.imageWidth, planeData.imageHeight) * 0.5f - ImVec2(centerX, centerY);
@@ -717,16 +728,16 @@ void NoPlayer::draw()
 
 	auto imageToScreenCoords = [&](const ImVec2& imageCoords)
 	{
+		// Map image-space coordinates back to screen-space for overlays.
 		ImVec2 screenCoords = imageCoords - ImVec2(planeData.imageWidth, planeData.imageHeight) * 0.5f + ImVec2(centerX, centerY);
 		screenCoords *= ImVec2(planeData.pixelAspect, 1.0f) * scale * compensateMIP * factor;
 		screenCoords += ImVec2(displayW, displayH) * 0.5f + ImVec2(offsetX, offsetY) - shift;
 		return screenCoords;
 	};
 
-	// Mouse actions
 	if (!io.WantCaptureMouse)
 	{
-		// Zoom by scrolling
+		// Zoom around mouse cursor using wheel input.
 		if (io.MouseWheel!=0.0)
 		{
 			ImVec2 scalePivot = ImGui::GetMousePos() - ImVec2(displayW, displayH)/2.f - ImVec2(offsetX, offsetY);
@@ -738,9 +749,7 @@ void NoPlayer::draw()
 			scale *= powf(2, io.MouseWheel/3.f);
 		}
 
-		// Scale with RMB
-		// While adjusting zoom values are updated in "shift" and "factor"
-		// When finished (RMB released) these values are baked into scale and offsetX offsetY
+		// Scale around RMB click pivot while dragging.
 		if (io.MouseDown[1])
 		{
 			ImVec2 delta = ImGui::GetMousePos() - io.MouseClickedPos[1];
@@ -751,6 +760,7 @@ void NoPlayer::draw()
 			ImVec2 scalePivot = io.MouseClickedPos[1] - ImVec2(displayW, displayH)/2.f - ImVec2(offsetX, offsetY);
 			shift = scalePivot * (factor - 1);
 		}
+		// Commit temporary scale transform when RMB is released.
 		else if (io.MouseReleased[1])
 		{
 			scale *= factor;
@@ -761,13 +771,14 @@ void NoPlayer::draw()
 			factor = 1.0;
 		}
 
-		// Pan with MMB
+		// Pan view with MMB drag.
 		if (io.MouseDown[2])
 		{
 			offsetX += ImGui::GetIO().MouseDelta.x;
 			offsetY += ImGui::GetIO().MouseDelta.y;
 		}
 
+		// Start inspector region selection on LMB click inside image.
 		if (inspect && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 		{
 			const ImVec2 clickedCoords = screenToImageCoords(io.MouseClickedPos[ImGuiMouseButton_Left]);
@@ -783,6 +794,7 @@ void NoPlayer::draw()
 
 	if (inspectRegionDragging)
 	{
+		// Update active region while dragging.
 		if (io.MouseDown[ImGuiMouseButton_Left])
 		{
 			const ImVec2 currentCoords = clampImageCoords(screenToImageCoords(ImGui::GetMousePos()), planeData);
@@ -792,6 +804,7 @@ void NoPlayer::draw()
 			inspectRegionMoved = deltaX >= 1.0f || deltaY >= 1.0f;
 		}
 
+		// Finalize region selection on LMB release.
 		if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
 		{
 			if (inspectRegionMoved)
@@ -813,9 +826,9 @@ void NoPlayer::draw()
 		inspectRegionMoved = false;
 	}
 
-	// Shortcuts
 	if (!io.WantCaptureKeyboard)
 	{
+		// Apply viewer keyboard shortcuts only when UI is not typing.
 			if (ImGui::IsKeyPressed(ImGuiKey_RightBracket))
 			{
 				activePlaneIdx = (activePlaneIdx+1)%imagePlanes.size();
@@ -837,7 +850,6 @@ void NoPlayer::draw()
 
 		if (ImGui::IsKeyPressed(ImGuiKey_F))
 		{
-			// with this little offset we align image and screen pixels for even and odd resolutions
 			offsetX = 0.25;
 			offsetY = 0.25;
 			if (scale == 1.0/compensateMIP)
@@ -855,7 +867,6 @@ void NoPlayer::draw()
 			plane.offsetValues = 0.0;
 		}
 			
-		//Zoom in
 		if (ImGui::IsKeyPressed(ImGuiKey_KeypadAdd))
 		{
 			targetOffsetX = offsetX * 2;
@@ -864,7 +875,6 @@ void NoPlayer::draw()
 			lag = 4;
 		}
 
-		// Zoom out
 		if (ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract))
 		{
 			targetOffsetX = offsetX * 0.5f;
@@ -896,7 +906,6 @@ void NoPlayer::draw()
 				float min_value = std::numeric_limits<float>::max();
 				float max_value = std::numeric_limits<float>::lowest();
 				float t;
-				// TODO: schedule image stats upfront asynchronously 
 				planeData.getRange(pixel_min, pixel_max);
 
 				if (channelSoloing >= SOLO_R && channelSoloing <= SOLO_B && channelSoloing <= planeData.len)
@@ -966,6 +975,7 @@ void NoPlayer::draw()
 
 	if (help)
 	{
+		// Show centered shortcut help overlay.
 
 				static const char* helpMsg = 
 					"              Shortcuts:\n\n"
@@ -1002,6 +1012,7 @@ void NoPlayer::draw()
 	}
 	else if (ui)
 	{
+		// Draw metadata, AOV list, and grading controls.
 		ImGui::SetNextWindowPos(ImVec2(unit, unit));
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 									| ImGuiWindowFlags_AlwaysAutoResize
@@ -1009,7 +1020,6 @@ void NoPlayer::draw()
 									;
 		ImGui::Begin( "Info", nullptr, windowFlags);
 		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5, 0.5, 0.5, 1));
-		// ImGui::Text("%.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 		ImGui::Text(imageFileName.c_str());
 		if (subimages>1)
 		{
@@ -1212,6 +1222,7 @@ void NoPlayer::draw()
 
 	if (planeReady != ImagePlaneData::TEXTURE_GENERATED)
 	{
+		// Show loading indicator until texture upload is complete.
 		const char* message = "Loading...";
 		ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2.f);
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
@@ -1224,6 +1235,7 @@ void NoPlayer::draw()
 
 	if (inspect)
 	{
+		// Draw inspector popup with cursor or region average values.
 		const ImVec2 mousePos = ImGui::GetMousePos();
 		const ImVec2 coords = screenToImageCoords(mousePos);
 		const bool cursorInsideImage = isPointInsideImage(coords, planeData);
@@ -1276,8 +1288,6 @@ void NoPlayer::draw()
 			}
 			else
 			{
-				// TODO: Fix rounding
-				// The pixel pointer is little off when Pixel Aspect !=1.0
 				const int x = static_cast<int>(coords.x + planeData.imageOffsetX);
 				const int y = static_cast<int>(coords.y + planeData.imageOffsetY);
 
@@ -1287,8 +1297,6 @@ void NoPlayer::draw()
 				}
 				else
 				{
-					// Results are not intuitive when Display Window offset applied
-					// Coordinates in Display window are used to access pixel values in OpenImageIO
 					ImGui::Text("Display: (%d, %d)", x, y);
 					ImGui::Text("Data:    (%d, %d)",
 								static_cast<int>(coords.x - planeData.windowOffsetX),
@@ -1366,6 +1374,7 @@ void NoPlayer::draw()
 		const bool showSelection = inspectRegionActive || (inspectRegionDragging && inspectRegionMoved);
 		if (showSelection)
 		{
+			// Draw selection rectangle overlay in screen-space.
 			int drawMinX = 0;
 			int drawMinY = 0;
 			int drawMaxX = 0;
@@ -1385,13 +1394,14 @@ void NoPlayer::draw()
 
 	ImGui::Render();
 
-	// Draw on Main Window Background
+	// Render the image quad and optional display-window frame.
 	glViewport(0, 0, displayW, displayH);
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
 	const bool renderSoloMode = canRenderSoloMode(channelSoloing, planeData);
 	if(renderSoloMode)
 	{
+		// Push per-frame uniforms and draw image texture.
 		glUseProgram(shader);
 
 		glUniform2f(glGetUniformLocation(shader, "offset"),  (offsetX - shift.x + centerX * scale * factor * compensateMIP)/(float)displayW,
@@ -1414,9 +1424,10 @@ void NoPlayer::draw()
 		glUniform1f(glGetUniformLocation(shader, "flash"), flash);
 
 		glDisable(GL_BLEND);
-		glDisable(GL_DEPTH_TEST); // prevents framebuffer rectangle from being discarded
+		glDisable(GL_DEPTH_TEST);
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, planeData.glTexture);
+		// Bind OCIO LUT textures referenced by the active shader.
 		bindOCIOTextures();
 		glBindVertexArray(VAO);
 		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
@@ -1424,6 +1435,7 @@ void NoPlayer::draw()
 
 	if (!planeData.windowMatchData || !renderSoloMode)
 	{
+		// Draw display-window outline when needed.
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 		glUseProgram(frameShader);
