@@ -4,6 +4,8 @@
 
 #include <string>
 #include <queue>
+#include <condition_variable>
+#include <thread>
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -26,7 +28,7 @@ public:
 	void run();
 	void draw();
 	void setChannelSoloing(int idx) {channelSoloing = idx;}
-	void clear() { imagePlanes.clear();}
+	void clear();
 	std::string getFileName() {return imageFileName;}
 
 private:
@@ -36,27 +38,39 @@ private:
 	void addShader(GLuint program, const char* shaderCode, GLenum type);
 	void createShaders();
 	void loader();
+	void enqueueLoadLocked(ImagePlaneData* plane);
+
+	struct LoadTask
+	{
+		ImagePlaneData* plane = nullptr;
+		unsigned int generation = 0;
+	};
 
 private:
-	GLFWwindow *mainWindow;
+	GLFWwindow *mainWindow = nullptr;
 
 	std::string imageFileName;
 	unsigned int subimages;
 	unsigned int mips;
 
 	std::vector<ImagePlane> imagePlanes;
-	std::vector<ImagePlaneData*> loadingQueue;
-	std::queue<ImagePlaneData*> textureQueue;
+	std::vector<LoadTask> loadingQueue;
+	std::queue<LoadTask> textureQueue;
 	std::mutex mtx;
+	std::condition_variable queueCondition;
+	std::thread loaderThread;
+	bool loaderStop = false;
+	unsigned int activeLoads = 0;
+	unsigned int queueGeneration = 1;
 
 	int activePlaneIdx;
 	int activeMIP;
 
-	GLuint VAO;
-	GLuint VBO;
+	GLuint VAO = 0;
+	GLuint VBO = 0;
 
-	GLuint shader;
-	GLuint frameShader;
+	GLuint shader = 0;
+	GLuint frameShader = 0;
 
 	float scale;
 	float offsetX;

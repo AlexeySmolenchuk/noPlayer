@@ -3,13 +3,30 @@
 #include <imgui_impl_glfw.h>
 #include <OpenImageIO/imageio.h>
 #include <OpenEXR/OpenEXRConfig.h>
+#include <limits>
+
+
+void releasePlaneTextures(std::vector<ImagePlane>& planes)
+{
+	for (ImagePlane& plane : planes)
+	{
+		for (ImagePlaneData& mip : plane.MIPs)
+		{
+			if (mip.glTexture != 0)
+			{
+				glDeleteTextures(1, &mip.glTexture);
+				mip.glTexture = 0;
+			}
+		}
+	}
+}
+
 
 void dropCallback(GLFWwindow* window, int count, const char** paths)
 {
     // for (int i = 0;  i < count;  i++)
     //     std::cout << paths[i] << std::endl;
 
-	// TODO amend async tasks first
 	NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(window));
 	view->clear();
 	view->init(paths[0]);
@@ -20,7 +37,6 @@ void framebufferSizeCallback(GLFWwindow* window, int width, int height)
 {
 	// make sure the viewport matches the new window dimensions; note that width and
 	// height will be significantly larger than specified on retina displays.
-	// glViewport(0, 0, width, height);
 	NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(window));
 	view->draw();
 }
@@ -37,7 +53,7 @@ GLFWmonitor* getCurrentMonitor(GLFWwindow *window)
 	const GLFWvidmode *mode;
 
 	bestoverlap = 0;
-	bestmonitor = NULL;
+	bestmonitor = nullptr;
 
 	glfwGetWindowPos(window, &wx, &wy);
 	glfwGetWindowSize(window, &ww, &wh);
@@ -161,8 +177,8 @@ NoPlayer::NoPlayer()
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
-	io.IniFilename = NULL;
-	io.LogFilename = NULL;
+	io.IniFilename = nullptr;
+	io.LogFilename = nullptr;
 
 	ImGui::StyleColorsDark();
 
@@ -174,12 +190,12 @@ NoPlayer::NoPlayer()
 	createPlane();
 	createShaders();
 
-	std::thread(&NoPlayer::loader, this).detach();
-
 	using namespace OIIO;
 	cache = ImageCache::create ();
 	cache->attribute ("max_memory_MB", 8000.0f);
 	cache->attribute ("autotile", 64);
+
+	loaderThread = std::thread(&NoPlayer::loader, this);
 };
 
 
@@ -208,15 +224,69 @@ NoPlayer::init(const char* fileName, bool fresh)
 	{
 		for(auto mip = ip->MIPs.rbegin(); mip != ip->MIPs.rend(); ++mip)
 		{
-			loadingQueue.push_back(&(*mip));
-			mip->ready = ImagePlaneData::ISSUED;
+			enqueueLoadLocked(&(*mip));
 		}
 	}
 }
 
 
+void NoPlayer::clear()
+{
+	std::unique_lock<std::mutex> lock(mtx);
+
+	// Invalidate queued work and wait until the worker is done with any in-flight load.
+	queueGeneration++;
+	loadingQueue.clear();
+	while (!textureQueue.empty())
+		textureQueue.pop();
+	queueCondition.wait(lock, [this]() { return activeLoads == 0; });
+
+	releasePlaneTextures(imagePlanes);
+	imagePlanes.clear();
+	activePlaneIdx = 0;
+	activeMIP = 0;
+}
+
+
 NoPlayer::~NoPlayer()
 {
+	{
+		std::lock_guard<std::mutex> lock(mtx);
+		loaderStop = true;
+		loadingQueue.clear();
+		queueCondition.notify_all();
+	}
+	if (loaderThread.joinable())
+		loaderThread.join();
+
+	glfwMakeContextCurrent(mainWindow);
+	{
+		std::lock_guard<std::mutex> lock(mtx);
+		releasePlaneTextures(imagePlanes);
+		imagePlanes.clear();
+	}
+
+	if (shader != 0)
+	{
+		glDeleteProgram(shader);
+		shader = 0;
+	}
+	if (frameShader != 0)
+	{
+		glDeleteProgram(frameShader);
+		frameShader = 0;
+	}
+	if (VBO != 0)
+	{
+		glDeleteBuffers(1, &VBO);
+		VBO = 0;
+	}
+	if (VAO != 0)
+	{
+		glDeleteVertexArrays(1, &VAO);
+		VAO = 0;
+	}
+
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
@@ -224,32 +294,69 @@ NoPlayer::~NoPlayer()
 	glfwTerminate();
 }
 
+
+void NoPlayer::enqueueLoadLocked(ImagePlaneData* plane)
+{
+	if (plane == nullptr)
+		return;
+
+	if (plane->ready != ImagePlaneData::NOT_ISSUED)
+		return;
+
+	for (const LoadTask &task : loadingQueue)
+	{
+		if (task.generation == queueGeneration && task.plane == plane)
+			return;
+	}
+
+	loadingQueue.push_back({plane, queueGeneration});
+	plane->ready = ImagePlaneData::ISSUED;
+	queueCondition.notify_one();
+}
+
+
 // Helper process, loading data from queue
 void NoPlayer::loader()
 {
 	while (true)
 	{
-		mtx.lock();
-		if (!loadingQueue.empty())
+		LoadTask task;
 		{
-			size_t idx = loadingQueue.size() - 1;
-			ImagePlaneData* plane = loadingQueue[idx];
+			std::unique_lock<std::mutex> lock(mtx);
+			queueCondition.wait(lock, [this]()
+			{
+				return loaderStop || !loadingQueue.empty();
+			});
 
-			loadingQueue.erase(loadingQueue.begin() + idx);
+			if (loaderStop && loadingQueue.empty())
+				return;
 
-			mtx.unlock();
+			task = loadingQueue.back();
+			loadingQueue.pop_back();
 
-			if (plane->pixels == nullptr)
-				plane->load();
+			if (task.plane == nullptr ||
+				task.generation != queueGeneration ||
+				task.plane->ready != ImagePlaneData::ISSUED)
+			{
+				continue;
+			}
 
-			mtx.lock();
-			textureQueue.push(plane);
-			mtx.unlock();
+			task.plane->ready = ImagePlaneData::LOADING_STARTED;
+			++activeLoads;
 		}
-		else
+
+		bool loadOk = task.plane->load();
+
 		{
-			mtx.unlock();
-			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			std::lock_guard<std::mutex> lock(mtx);
+			if (!loaderStop && task.generation == queueGeneration && task.plane)
+			{
+				task.plane->ready = loadOk ? ImagePlaneData::LOADED : ImagePlaneData::NOT_ISSUED;
+				if (loadOk)
+					textureQueue.push(task);
+			}
+			--activeLoads;
+			queueCondition.notify_all();
 		}
 	}
 }
@@ -272,33 +379,33 @@ void NoPlayer::run()
 		{
 			ImagePlaneData &plane = imagePlanes[activePlaneIdx].MIPs[activeMIP];
 
-			if ( plane.ready < ImagePlaneData::LOADING_STARTED)
+			ImagePlaneData::state planeReady;
+			{
+				std::lock_guard<std::mutex> lock(mtx);
+				planeReady = plane.ready;
+			}
+
+			if (planeReady < ImagePlaneData::LOADING_STARTED)
 			{
 				std::unique_lock<std::mutex> lock(mtx);
-				if (loadingQueue.back() != &plane)
-				{
-					loadingQueue.push_back(&plane);
-					plane.ready = ImagePlaneData::ISSUED;
-				}
+				enqueueLoadLocked(&plane);
 			}
 			else
 			{
+				std::unique_lock<std::mutex> lock(mtx);
+
 				// we can preload next AOV
 				int next = (activePlaneIdx + 1)%imagePlanes.size();
-				if ( imagePlanes[next].MIPs[activeMIP].ready == ImagePlaneData::NOT_ISSUED)
+				if (imagePlanes[next].MIPs[activeMIP].ready == ImagePlaneData::NOT_ISSUED)
 				{
-					std::unique_lock<std::mutex> lock(mtx);
-					loadingQueue.push_back(&imagePlanes[next].MIPs[activeMIP]);
-					imagePlanes[next].MIPs[activeMIP].ready = ImagePlaneData::ISSUED;
+					enqueueLoadLocked(&imagePlanes[next].MIPs[activeMIP]);
 				}
 
 				// preload next MIP
 				int nextMIP = (activeMIP + 1) % imagePlanes[activePlaneIdx].MIPs.size();
-				if ( imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == ImagePlaneData::NOT_ISSUED)
+				if (imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == ImagePlaneData::NOT_ISSUED)
 				{
-					std::unique_lock<std::mutex> lock(mtx);
-					loadingQueue.push_back(&imagePlanes[activePlaneIdx].MIPs[nextMIP]);
-					imagePlanes[activePlaneIdx].MIPs[nextMIP].ready = ImagePlaneData::ISSUED;
+					enqueueLoadLocked(&imagePlanes[activePlaneIdx].MIPs[nextMIP]);
 				}
 			}
 
@@ -309,12 +416,23 @@ void NoPlayer::run()
 			// }
 
 			// Generate texture for imagePlane from the Queue
-			if (textureQueue.size()!=0)
+			LoadTask finishedTask;
 			{
-				textureQueue.front()->generateGlTexture();
-				mtx.lock();
-				textureQueue.pop();
-				mtx.unlock();
+				std::lock_guard<std::mutex> lock(mtx);
+				if (!textureQueue.empty())
+				{
+					finishedTask = textureQueue.front();
+					textureQueue.pop();
+				}
+			}
+			if (finishedTask.plane)
+			{
+				bool generated = finishedTask.plane->generateGlTexture();
+				std::lock_guard<std::mutex> lock(mtx);
+				if (finishedTask.generation == queueGeneration)
+				{
+					finishedTask.plane->ready = generated ? ImagePlaneData::TEXTURE_GENERATED : ImagePlaneData::NOT_ISSUED;
+				}
 			}
 		}
 	}
@@ -517,10 +635,10 @@ void NoPlayer::draw()
 		{
 			if (channelSoloing <= planeData.len)
 			{
-				float pixel_min[4], pixel_max[4];
-				float min_value = FLT_MAX;
-				float max_value = FLT_MIN;
-				float t;
+					float pixel_min[4], pixel_max[4];
+					float min_value = std::numeric_limits<float>::max();
+					float max_value = std::numeric_limits<float>::lowest();
+					float t;
 				// TODO: schedule image stats upfront asynchronously 
 				planeData.getRange(pixel_min, pixel_max);
 
@@ -552,19 +670,19 @@ void NoPlayer::draw()
 		if (ImGui::IsKeyPressed(ImGuiKey_I))
 			inspect = !inspect;
 
-		if (ImGui::IsKeyPressed(ImGuiKey_GraveAccent))
+		if (ImGui::IsKeyDown(ImGuiKey_GraveAccent))
 			setChannelSoloing(0);
 
-		if (ImGui::IsKeyPressed(ImGuiKey_1))
+		if (ImGui::IsKeyDown(ImGuiKey_1))
 			setChannelSoloing(1);
 
-		if (ImGui::IsKeyPressed(ImGuiKey_2))
+		if (ImGui::IsKeyDown(ImGuiKey_2))
 			setChannelSoloing(2);
 
-		if (ImGui::IsKeyPressed(ImGuiKey_3))
+		if (ImGui::IsKeyDown(ImGuiKey_3))
 			setChannelSoloing(3);
 
-		if (ImGui::IsKeyPressed(ImGuiKey_4))
+		if (ImGui::IsKeyDown(ImGuiKey_4))
 			setChannelSoloing(4);
 	}
 
@@ -732,14 +850,14 @@ void NoPlayer::draw()
 			{
 				if (channelSoloing==0)
 				{
-					ImGui::Text(plane.channels.c_str());
+					ImGui::Text(imagePlanes[n].channels.c_str());
 				}
 				else
 				{
 					for (int i = 0; i < planeData.len; i++)
 					{
 						if (i) ImGui::SameLine(0, 0);
-						ImGui::TextColored( ((i+1)==channelSoloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1), plane.channels.substr(i, 1).c_str());
+						ImGui::TextColored( ((i+1)==channelSoloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1), imagePlanes[n].channels.substr(i, 1).c_str());
 					}
 				}
 			}

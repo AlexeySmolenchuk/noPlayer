@@ -2,15 +2,10 @@
 #include "imagePlane.h"
 #include <OpenImageIO/imagebuf.h>
 #include <OpenImageIO/imagebufalgo.h>
-#include <float.h>
+#include <limits>
 
-void ImagePlaneData::load()
+bool ImagePlaneData::load()
 {
-	if (ready != ISSUED)
-		return;
-
-	ready = LOADING_STARTED;
-
 	using namespace OIIO;
 
 	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };
@@ -21,7 +16,7 @@ void ImagePlaneData::load()
 	{
 		std::cerr << "Could not open " << imageFileName
 				<< ", error = " << OIIO::geterror() << "\n";
-		return;
+		return false;
 	}
 
 	pixels = std::shared_ptr<precision[]>(new precision[imageWidth * imageHeight * len]);
@@ -65,7 +60,7 @@ void ImagePlaneData::load()
 	// 	return;
 	// }
 
-	ready = LOADED;
+	return ok;
 }
 
 
@@ -89,8 +84,8 @@ void ImagePlaneData::getRange(float *minimum, float *maximum)
 {
 	for (int i = 0; i < len; i++)
 	{
-		minimum[i] = FLT_MAX;
-		maximum[i] = FLT_MIN;
+		minimum[i] = std::numeric_limits<float>::max();
+		maximum[i] = std::numeric_limits<float>::lowest();
 	}
 
 	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };
@@ -108,13 +103,18 @@ void ImagePlaneData::getRange(float *minimum, float *maximum)
 }
 
 
-void ImagePlaneData::generateGlTexture()
+bool ImagePlaneData::generateGlTexture()
 {
-	if (ready != LOADED)
-		return;
+	if (len < 1 || len > 4 || pixels == nullptr)
+	{
+		return false;
+	}
 
 	glPixelStorei(GL_PACK_ALIGNMENT, 2);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
+
+	if (glTexture != 0)
+		glDeleteTextures(1, &glTexture);
 
 	// Create an OpenGL texture identifier
 	glGenTextures(1, &glTexture);
@@ -136,5 +136,5 @@ void ImagePlaneData::generateGlTexture()
 					&pixels[0]);
 
 	// std::cout << glGetError() << std::endl;	
-	ready = TEXTURE_GENERATED;
+	return true;
 }
