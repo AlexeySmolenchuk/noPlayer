@@ -4,13 +4,8 @@
 #include <OpenImageIO/imagebufalgo.h>
 #include <float.h>
 
-void ImagePlaneData::load()
+bool ImagePlaneData::load()
 {
-	if (ready != ISSUED)
-		return;
-
-	ready = LOADING_STARTED;
-
 	using namespace OIIO;
 
 	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };
@@ -21,8 +16,7 @@ void ImagePlaneData::load()
 	{
 		std::cerr << "Could not open " << imageFileName
 				<< ", error = " << OIIO::geterror() << "\n";
-		ready = NOT_ISSUED;
-		return;
+		return false;
 	}
 
 	pixels = std::shared_ptr<precision[]>(new precision[imageWidth * imageHeight * len]);
@@ -66,7 +60,7 @@ void ImagePlaneData::load()
 	// 	return;
 	// }
 
-	ready = ok ? LOADED : NOT_ISSUED;
+	return ok;
 }
 
 
@@ -109,10 +103,12 @@ void ImagePlaneData::getRange(float *minimum, float *maximum)
 }
 
 
-void ImagePlaneData::generateGlTexture()
+bool ImagePlaneData::generateGlTexture()
 {
-	if (ready != LOADED)
-		return;
+	if (len < 1 || len > 4 || pixels == nullptr)
+	{
+		return false;
+	}
 
 	glPixelStorei(GL_PACK_ALIGNMENT, 2);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
@@ -137,5 +133,5 @@ void ImagePlaneData::generateGlTexture()
 					&pixels[0]);
 
 	// std::cout << glGetError() << std::endl;	
-	ready = TEXTURE_GENERATED;
+	return true;
 }

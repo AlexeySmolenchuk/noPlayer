@@ -274,39 +274,43 @@ void NoPlayer::loader()
 {
 	while (true)
 	{
+		LoadTask task;
 		{
-			LoadTask task;
+			std::unique_lock<std::mutex> lock(mtx);
+			queueCondition.wait(lock, [this]()
 			{
-				std::unique_lock<std::mutex> lock(mtx);
-				queueCondition.wait(lock, [this]()
-				{
-					return loaderStop || !loadingQueue.empty();
-				});
+				return loaderStop || !loadingQueue.empty();
+			});
 
-				if (loaderStop && loadingQueue.empty())
-					return;
+			if (loaderStop && loadingQueue.empty())
+				return;
 
-				task = loadingQueue.back();
-				loadingQueue.pop_back();
-				++activeLoads;
+			task = loadingQueue.back();
+			loadingQueue.pop_back();
+
+			if (task.plane == nullptr ||
+				task.generation != queueGeneration ||
+				task.plane->ready != ImagePlaneData::ISSUED)
+			{
+				continue;
 			}
 
-			if (task.plane && task.plane->pixels == nullptr)
-				task.plane->load();
+			task.plane->ready = ImagePlaneData::LOADING_STARTED;
+			++activeLoads;
+		}
 
+		bool loadOk = task.plane->load();
+
+		{
+			std::lock_guard<std::mutex> lock(mtx);
+			if (!loaderStop && task.generation == queueGeneration && task.plane)
 			{
-				std::lock_guard<std::mutex> lock(mtx);
-				// Skip stale tasks from older file drops.
-				if (!loaderStop &&
-					task.generation == queueGeneration &&
-					task.plane &&
-					task.plane->ready == ImagePlaneData::LOADED)
-				{
+				task.plane->ready = loadOk ? ImagePlaneData::LOADED : ImagePlaneData::NOT_ISSUED;
+				if (loadOk)
 					textureQueue.push(task);
-				}
-				--activeLoads;
-				queueCondition.notify_all();
 			}
+			--activeLoads;
+			queueCondition.notify_all();
 		}
 	}
 }
@@ -329,26 +333,32 @@ void NoPlayer::run()
 		{
 			ImagePlaneData &plane = imagePlanes[activePlaneIdx].MIPs[activeMIP];
 
-			if ( plane.ready < ImagePlaneData::LOADING_STARTED)
+			ImagePlaneData::state planeReady;
+			{
+				std::lock_guard<std::mutex> lock(mtx);
+				planeReady = plane.ready;
+			}
+
+			if (planeReady < ImagePlaneData::LOADING_STARTED)
 			{
 				std::unique_lock<std::mutex> lock(mtx);
 				enqueueLoadLocked(&plane);
 			}
 			else
 			{
+				std::unique_lock<std::mutex> lock(mtx);
+
 				// we can preload next AOV
 				int next = (activePlaneIdx + 1)%imagePlanes.size();
-				if ( imagePlanes[next].MIPs[activeMIP].ready == ImagePlaneData::NOT_ISSUED)
+				if (imagePlanes[next].MIPs[activeMIP].ready == ImagePlaneData::NOT_ISSUED)
 				{
-					std::unique_lock<std::mutex> lock(mtx);
 					enqueueLoadLocked(&imagePlanes[next].MIPs[activeMIP]);
 				}
 
 				// preload next MIP
 				int nextMIP = (activeMIP + 1) % imagePlanes[activePlaneIdx].MIPs.size();
-				if ( imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == ImagePlaneData::NOT_ISSUED)
+				if (imagePlanes[activePlaneIdx].MIPs[nextMIP].ready == ImagePlaneData::NOT_ISSUED)
 				{
-					std::unique_lock<std::mutex> lock(mtx);
 					enqueueLoadLocked(&imagePlanes[activePlaneIdx].MIPs[nextMIP]);
 				}
 			}
@@ -369,9 +379,14 @@ void NoPlayer::run()
 					textureQueue.pop();
 				}
 			}
-			if (finishedTask.plane && finishedTask.generation == queueGeneration)
+			if (finishedTask.plane)
 			{
-				finishedTask.plane->generateGlTexture();
+				bool generated = finishedTask.plane->generateGlTexture();
+				std::lock_guard<std::mutex> lock(mtx);
+				if (finishedTask.generation == queueGeneration)
+				{
+					finishedTask.plane->ready = generated ? ImagePlaneData::TEXTURE_GENERATED : ImagePlaneData::NOT_ISSUED;
+				}
 			}
 		}
 	}
