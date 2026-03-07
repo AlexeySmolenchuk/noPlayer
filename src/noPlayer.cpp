@@ -37,7 +37,6 @@ void framebufferSizeCallback(GLFWwindow* window, int width, int height)
 {
 	// make sure the viewport matches the new window dimensions; note that width and
 	// height will be significantly larger than specified on retina displays.
-	// glViewport(0, 0, width, height);
 	NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(window));
 	view->draw();
 }
@@ -54,7 +53,7 @@ GLFWmonitor* getCurrentMonitor(GLFWwindow *window)
 	const GLFWvidmode *mode;
 
 	bestoverlap = 0;
-	bestmonitor = NULL;
+	bestmonitor = nullptr;
 
 	glfwGetWindowPos(window, &wx, &wy);
 	glfwGetWindowSize(window, &ww, &wh);
@@ -178,8 +177,8 @@ NoPlayer::NoPlayer()
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
-	io.IniFilename = NULL;
-	io.LogFilename = NULL;
+	io.IniFilename = nullptr;
+	io.LogFilename = nullptr;
 
 	ImGui::StyleColorsDark();
 
@@ -671,19 +670,19 @@ void NoPlayer::draw()
 		if (ImGui::IsKeyPressed(ImGuiKey_I))
 			inspect = !inspect;
 
-		if (ImGui::IsKeyPressed(ImGuiKey_GraveAccent))
+		if (ImGui::IsKeyDown(ImGuiKey_GraveAccent))
 			setChannelSoloing(0);
 
-		if (ImGui::IsKeyPressed(ImGuiKey_1))
+		if (ImGui::IsKeyDown(ImGuiKey_1))
 			setChannelSoloing(1);
 
-		if (ImGui::IsKeyPressed(ImGuiKey_2))
+		if (ImGui::IsKeyDown(ImGuiKey_2))
 			setChannelSoloing(2);
 
-		if (ImGui::IsKeyPressed(ImGuiKey_3))
+		if (ImGui::IsKeyDown(ImGuiKey_3))
 			setChannelSoloing(3);
 
-		if (ImGui::IsKeyPressed(ImGuiKey_4))
+		if (ImGui::IsKeyDown(ImGuiKey_4))
 			setChannelSoloing(4);
 	}
 
@@ -851,14 +850,14 @@ void NoPlayer::draw()
 			{
 				if (channelSoloing==0)
 				{
-					ImGui::Text(plane.channels.c_str());
+					ImGui::Text(imagePlanes[n].channels.c_str());
 				}
 				else
 				{
 					for (int i = 0; i < planeData.len; i++)
 					{
 						if (i) ImGui::SameLine(0, 0);
-						ImGui::TextColored( ((i+1)==channelSoloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1), plane.channels.substr(i, 1).c_str());
+						ImGui::TextColored( ((i+1)==channelSoloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1), imagePlanes[n].channels.substr(i, 1).c_str());
 					}
 				}
 			}
