@@ -113,6 +113,9 @@ bool ImagePlaneData::generateGlTexture()
 	glPixelStorei(GL_PACK_ALIGNMENT, 2);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
 
+	if (glTexture != 0)
+		glDeleteTextures(1, &glTexture);
+
 	// Create an OpenGL texture identifier
 	glGenTextures(1, &glTexture);
 	glBindTexture(GL_TEXTURE_2D, glTexture);
