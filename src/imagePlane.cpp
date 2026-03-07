@@ -21,6 +21,7 @@ void ImagePlaneData::load()
 	{
 		std::cerr << "Could not open " << imageFileName
 				<< ", error = " << OIIO::geterror() << "\n";
+		ready = NOT_ISSUED;
 		return;
 	}
 
@@ -65,7 +66,7 @@ void ImagePlaneData::load()
 	// 	return;
 	// }
 
-	ready = LOADED;
+	ready = ok ? LOADED : NOT_ISSUED;
 }
 
 
