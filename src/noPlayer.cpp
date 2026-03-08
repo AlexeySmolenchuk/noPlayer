@@ -17,6 +17,7 @@ constexpr int SOLO_H = 4;
 constexpr int SOLO_S = 5;
 constexpr int SOLO_L = 6;
 constexpr int SOLO_A = 7;
+constexpr float WAVEFORM_LOG_EPSILON = 1e-6f;
 
 int clampMipIndexForPlane(const ImagePlane& plane, int mipIndex)
 {
@@ -171,6 +172,55 @@ void getImageSelectionBounds(const ImVec2& start, const ImVec2& end, const Image
 
 	maxX = std::max(maxX, minX);
 	maxY = std::max(maxY, minY);
+}
+
+float computeWaveformYuvLuma(float red, float green, float blue)
+{
+	return 0.2126f * red + 0.7152f * green + 0.0722f * blue;
+}
+
+float toWaveformLogValue(float value, float minLogValue)
+{
+	if (!std::isfinite(value) || value <= WAVEFORM_LOG_EPSILON)
+		return minLogValue;
+	return std::log2(value);
+}
+
+int waveformSingleChannelIndex(WaveformPanel::PaintMode mode)
+{
+	switch (mode)
+	{
+	case WaveformPanel::PaintMode::Red:
+		return 0;
+	case WaveformPanel::PaintMode::Green:
+		return 1;
+	case WaveformPanel::PaintMode::Blue:
+		return 2;
+	default:
+		return -1;
+	}
+}
+
+bool updateWaveformMatch(float value,
+						 float minLogValue,
+						 float targetLogValue,
+						 int candidateY,
+						 int candidateChannel,
+						 float& bestDistance,
+						 int& bestY,
+						 int& bestChannel)
+{
+	if (!std::isfinite(value))
+		return false;
+
+	const float distance = std::fabs(toWaveformLogValue(value, minLogValue) - targetLogValue);
+	if (distance >= bestDistance)
+		return false;
+
+	bestDistance = distance;
+	bestY = candidateY;
+	bestChannel = candidateChannel;
+	return true;
 }
 }
 
@@ -1383,6 +1433,42 @@ void NoPlayer::draw()
 									waveformSelectionMaxX, waveformSelectionMaxY);
 		}
 
+		WaveformPanel::SampleOverlayInfo waveformSampleOverlay;
+		if (waveformSplitView
+			&& inspect
+			&& planeReady >= ImagePlaneData::LOADED
+			&& planeData.pixels
+			&& planeData.imageWidth > 0
+			&& planeData.imageHeight > 0)
+		{
+			const ImVec2 mousePos = ImGui::GetMousePos();
+			const ImVec2 hoverCoords = screenToImageCoords(mousePos);
+			if (isPointInsideImageViewport(mousePos) && isPointInsideImage(hoverCoords, planeData))
+			{
+				const int sampleX = std::clamp(static_cast<int>(std::floor(hoverCoords.x)), 0, static_cast<int>(planeData.imageWidth) - 1);
+				const int sampleY = std::clamp(static_cast<int>(std::floor(hoverCoords.y)), 0, static_cast<int>(planeData.imageHeight) - 1);
+				const bool mouseInsideWaveformSelection = !waveformSelectionActive
+					|| (sampleX >= waveformSelectionMinX
+						&& sampleX <= waveformSelectionMaxX
+						&& sampleY >= waveformSelectionMinY
+						&& sampleY <= waveformSelectionMaxY);
+				if (mouseInsideWaveformSelection)
+				{
+					const int sampledChannels = std::min(planeData.len, 4);
+					const size_t pixelOffset = (static_cast<size_t>(sampleY) * static_cast<size_t>(planeData.imageWidth)
+											 + static_cast<size_t>(sampleX)) * static_cast<size_t>(planeData.len);
+					const precision* pixels = planeData.pixels.get();
+
+					waveformSampleOverlay.active = sampledChannels > 0;
+					waveformSampleOverlay.isRgb = isRgbChannels(planeData.channels) && planeData.len >= 3;
+					waveformSampleOverlay.channelCount = sampledChannels;
+					waveformSampleOverlay.sourceX = sampleX;
+					for (int channel = 0; channel < sampledChannels; channel++)
+						waveformSampleOverlay.values[channel] = static_cast<float>(pixels[pixelOffset + static_cast<size_t>(channel)]);
+				}
+			}
+		}
+
 		const bool waveformSourceReady = planeReady >= ImagePlaneData::LOADED;
 		if (waveformSplitView)
 		{
@@ -1398,7 +1484,8 @@ void NoPlayer::draw()
 								waveformSelectionMinX,
 								waveformSelectionMinY,
 								waveformSelectionMaxX,
-								waveformSelectionMaxY);
+								waveformSelectionMaxY,
+								&waveformSampleOverlay);
 
 			const float splitterWidth = static_cast<float>(splitterWidthPx);
 			const float splitterX = static_cast<float>(analysisPanelWidth);
@@ -1453,6 +1540,7 @@ void NoPlayer::draw()
 
 	if (inspect)
 	{
+		const WaveformPanel::HoverInfo waveformHover = waveformPanel.getHoverInfo();
 		// Draw inspector popup with cursor or region average values.
 		const ImVec2 mousePos = ImGui::GetMousePos();
 		const ImVec2 coords = screenToImageCoords(mousePos);
@@ -1612,6 +1700,124 @@ void NoPlayer::draw()
 								true);
 			drawList->AddRect(screenMin, screenMax, IM_COL32(255, 210, 80, 220), 0.0f, 0, 1.5f);
 			drawList->PopClipRect();
+		}
+
+		if (waveformSplitView
+			&& waveformHover.active
+			&& planeReady >= ImagePlaneData::LOADED
+			&& planeData.pixels
+			&& planeData.imageWidth > 0
+			&& planeData.imageHeight > 0)
+		{
+			const bool planeIsRgb = isRgbChannels(planeData.channels) && planeData.len >= 3;
+			const precision* pixels = planeData.pixels.get();
+			const int sourceX = std::clamp(waveformHover.sourceX, 0, static_cast<int>(planeData.imageWidth) - 1);
+			const int searchMinY = std::clamp(waveformHover.sourceMinY, 0, static_cast<int>(planeData.imageHeight) - 1);
+			const int searchMaxY = std::clamp(waveformHover.sourceMaxY, searchMinY, static_cast<int>(planeData.imageHeight) - 1);
+			float bestDistance = std::numeric_limits<float>::max();
+			int bestY = searchMinY;
+			int bestChannel = -1;
+			bool foundMatch = false;
+
+			for (int sampleY = searchMinY; sampleY <= searchMaxY; sampleY++)
+			{
+				const size_t pixelOffset = (static_cast<size_t>(sampleY) * static_cast<size_t>(planeData.imageWidth)
+										 + static_cast<size_t>(sourceX)) * static_cast<size_t>(planeData.len);
+				if (planeIsRgb && waveformHover.paintMode == WaveformPanel::PaintMode::Rgb)
+				{
+					for (int channel = 0; channel < 3; channel++)
+					{
+						foundMatch = updateWaveformMatch(static_cast<float>(pixels[pixelOffset + static_cast<size_t>(channel)]),
+														 waveformHover.minLogValue,
+														 waveformHover.targetLogValue,
+														 sampleY,
+														 channel,
+														 bestDistance,
+														 bestY,
+														 bestChannel) || foundMatch;
+					}
+				}
+				else if (planeIsRgb)
+				{
+					const int singleChannel = waveformSingleChannelIndex(waveformHover.paintMode);
+					if (singleChannel >= 0 && singleChannel < planeData.len)
+					{
+						foundMatch = updateWaveformMatch(static_cast<float>(pixels[pixelOffset + static_cast<size_t>(singleChannel)]),
+														 waveformHover.minLogValue,
+														 waveformHover.targetLogValue,
+														 sampleY,
+														 singleChannel,
+														 bestDistance,
+														 bestY,
+														 bestChannel) || foundMatch;
+					}
+					else
+					{
+						const float red = static_cast<float>(pixels[pixelOffset + 0]);
+						const float green = static_cast<float>(pixels[pixelOffset + 1]);
+						const float blue = static_cast<float>(pixels[pixelOffset + 2]);
+						if (std::isfinite(red) && std::isfinite(green) && std::isfinite(blue))
+						{
+							foundMatch = updateWaveformMatch(computeWaveformYuvLuma(red, green, blue),
+															 waveformHover.minLogValue,
+															 waveformHover.targetLogValue,
+															 sampleY,
+															 -1,
+															 bestDistance,
+															 bestY,
+															 bestChannel) || foundMatch;
+						}
+					}
+				}
+				else
+				{
+					foundMatch = updateWaveformMatch(static_cast<float>(pixels[pixelOffset]),
+													 waveformHover.minLogValue,
+													 waveformHover.targetLogValue,
+													 sampleY,
+													 0,
+													 bestDistance,
+													 bestY,
+													 bestChannel) || foundMatch;
+				}
+			}
+
+			if (foundMatch)
+			{
+				const ImVec2 crossCenter = imageToScreenCoords(ImVec2(static_cast<float>(sourceX) + 0.5f,
+																 static_cast<float>(bestY) + 0.5f));
+				ImU32 crossColor = IM_COL32(240, 240, 220, 220);
+				if (bestChannel == 0)
+					crossColor = IM_COL32(255, 96, 96, 220);
+				else if (bestChannel == 1)
+					crossColor = IM_COL32(96, 255, 96, 220);
+				else if (bestChannel == 2)
+					crossColor = IM_COL32(96, 160, 255, 220);
+
+				ImDrawList* drawList = ImGui::GetForegroundDrawList();
+				drawList->PushClipRect(ImVec2(static_cast<float>(imageViewportX), static_cast<float>(imageViewportY)),
+									ImVec2(static_cast<float>(imageViewportX + imageViewportW),
+											static_cast<float>(imageViewportY + imageViewportH)),
+									true);
+				drawList->AddLine(ImVec2(crossCenter.x, static_cast<float>(imageViewportY)),
+								ImVec2(crossCenter.x, static_cast<float>(imageViewportY + imageViewportH)),
+								IM_COL32(0, 0, 0, 180),
+								1.0f);
+				drawList->AddLine(ImVec2(static_cast<float>(imageViewportX), crossCenter.y),
+								ImVec2(static_cast<float>(imageViewportX + imageViewportW), crossCenter.y),
+								IM_COL32(0, 0, 0, 180),
+								1.0f);
+				drawList->AddLine(ImVec2(crossCenter.x, static_cast<float>(imageViewportY)),
+								ImVec2(crossCenter.x, static_cast<float>(imageViewportY + imageViewportH)),
+								crossColor,
+								0.5f);
+				drawList->AddLine(ImVec2(static_cast<float>(imageViewportX), crossCenter.y),
+								ImVec2(static_cast<float>(imageViewportX + imageViewportW), crossCenter.y),
+								crossColor,
+								0.5f);
+				drawList->AddCircleFilled(crossCenter, 1.2f, crossColor);
+				drawList->PopClipRect();
+			}
 		}
 	}
 

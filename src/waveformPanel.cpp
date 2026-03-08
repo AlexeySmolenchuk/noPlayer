@@ -203,6 +203,7 @@ void WaveformPanel::invalidate()
 	cachedSelectionMinY = 0;
 	cachedSelectionMaxX = 0;
 	cachedSelectionMaxY = 0;
+	hoverInfo = HoverInfo();
 	releaseGlResources();
 }
 
@@ -762,7 +763,8 @@ void WaveformPanel::draw(int panelWidth,
 						 int selectionMinX,
 						 int selectionMinY,
 						 int selectionMaxX,
-						 int selectionMaxY)
+						 int selectionMaxY,
+						 const SampleOverlayInfo* sampleOverlayInfo)
 {
 	(void)unit;
 
@@ -806,86 +808,183 @@ void WaveformPanel::draw(int panelWidth,
 		const ImVec2 plotMax(frameMax.x - axisWidth, frameMax.y);
 		const float plotWidth = std::max(1.0f, plotMax.x - plotMin.x);
 		const float plotHeight = std::max(1.0f, plotMax.y - plotMin.y);
-		const int plotTextureWidth = std::max(1, static_cast<int>(std::round(plotWidth)));
-			const int plotTextureHeight = std::max(1, static_cast<int>(std::round(plotHeight)));
+	const int plotTextureWidth = std::max(1, static_cast<int>(std::round(plotWidth)));
+	const int plotTextureHeight = std::max(1, static_cast<int>(std::round(plotHeight)));
 
-			if (sourceReady && planeData != nullptr)
-				requestBuild(*planeData, planeIdx, mipIdx, generation,
-							plotTextureWidth, plotTextureHeight,
-							selectionActive, selectionMinX, selectionMinY, selectionMaxX, selectionMaxY);
-			consumeReadyResult();
+	if (sourceReady && planeData != nullptr)
+		requestBuild(*planeData, planeIdx, mipIdx, generation,
+					plotTextureWidth, plotTextureHeight,
+					selectionActive, selectionMinX, selectionMinY, selectionMaxX, selectionMaxY);
+	consumeReadyResult();
 
-			ImDrawList* drawList = ImGui::GetWindowDrawList();
-			drawList->AddRectFilled(frameMin, frameMax, IM_COL32(15, 15, 15, 255));
-			drawList->AddRectFilled(plotMin, plotMax, IM_COL32(14, 14, 14, 255));
+	ImDrawList* drawList = ImGui::GetWindowDrawList();
+	drawList->AddRectFilled(frameMin, frameMax, IM_COL32(15, 15, 15, 255));
+	drawList->AddRectFilled(plotMin, plotMax, IM_COL32(14, 14, 14, 255));
 
-			const int verticalDivisions = 8;
-			const int horizontalDivisions = 8;
-			for (int division = 1; division < verticalDivisions; division++)
-			{
-				const float x = plotMin.x + (plotWidth * static_cast<float>(division) / static_cast<float>(verticalDivisions));
-				drawList->AddLine(ImVec2(x, plotMin.y), ImVec2(x, plotMax.y), IM_COL32(42, 48, 36, 130), 1.0f);
-			}
+	const int verticalDivisions = 8;
+	const int horizontalDivisions = 8;
+	for (int division = 1; division < verticalDivisions; division++)
+	{
+		const float x = plotMin.x + (plotWidth * static_cast<float>(division) / static_cast<float>(verticalDivisions));
+		drawList->AddLine(ImVec2(x, plotMin.y), ImVec2(x, plotMax.y), IM_COL32(42, 48, 36, 130), 1.0f);
+	}
 
-			if (valid)
-			{
-				const float logSpan = std::max(EPSILON, cachedMaxLogValue - cachedMinLogValue);
-				const int firstStop = static_cast<int>(std::ceil(cachedMinLogValue));
-				const int lastStop = static_cast<int>(std::floor(cachedMaxLogValue));
-				const int stopStep = std::max(1, static_cast<int>(std::ceil(logSpan / static_cast<float>(horizontalDivisions))));
-				for (int stop = firstStop; stop <= lastStop; stop += stopStep)
-				{
-					const float normalized = std::clamp((static_cast<float>(stop) - cachedMinLogValue) / logSpan, 0.0f, 1.0f);
-					const float y = plotMax.y - normalized * plotHeight;
-					drawList->AddLine(ImVec2(plotMin.x, y), ImVec2(frameMax.x, y), IM_COL32(78, 88, 66, 110), 1.0f);
-				}
-			}
-			else
-			{
-				for (int division = 0; division <= horizontalDivisions; division++)
-				{
-					const float y = plotMin.y + (plotHeight * static_cast<float>(division) / static_cast<float>(horizontalDivisions));
-					drawList->AddLine(ImVec2(plotMin.x, y), ImVec2(frameMax.x, y), IM_COL32(42, 48, 36, 130), 1.0f);
-				}
-			}
-
-			if (texture != 0)
-			{
-				drawList->AddImage(static_cast<ImTextureID>(static_cast<uintptr_t>(texture)),
-								plotMin, plotMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f));
+	if (valid)
+	{
+		const float logSpan = std::max(EPSILON, cachedMaxLogValue - cachedMinLogValue);
+		const int firstStop = static_cast<int>(std::ceil(cachedMinLogValue));
+		const int lastStop = static_cast<int>(std::floor(cachedMaxLogValue));
+		const int stopStep = std::max(1, static_cast<int>(std::ceil(logSpan / static_cast<float>(horizontalDivisions))));
+		for (int stop = firstStop; stop <= lastStop; stop += stopStep)
+		{
+			const float normalized = std::clamp((static_cast<float>(stop) - cachedMinLogValue) / logSpan, 0.0f, 1.0f);
+			const float y = plotMax.y - normalized * plotHeight;
+			drawList->AddLine(ImVec2(plotMin.x, y), ImVec2(frameMax.x, y), IM_COL32(78, 88, 66, 110), 1.0f);
 		}
-			else
-			{
-				const char* statusMsg = sourceReady
-					? (selectionActive ? "Building selection waveform..." : "Building waveform...")
-					: "Loading waveform...";
-			const ImVec2 statusSize = ImGui::CalcTextSize(statusMsg);
-			drawList->AddText(ImVec2(plotMin.x + (plotWidth - statusSize.x) * 0.5f,
-									plotMin.y + (plotHeight - statusSize.y) * 0.5f),
+	}
+	else
+	{
+		for (int division = 0; division <= horizontalDivisions; division++)
+		{
+			const float y = plotMin.y + (plotHeight * static_cast<float>(division) / static_cast<float>(horizontalDivisions));
+			drawList->AddLine(ImVec2(plotMin.x, y), ImVec2(frameMax.x, y), IM_COL32(42, 48, 36, 130), 1.0f);
+		}
+	}
+
+	if (texture != 0)
+	{
+		drawList->AddImage(static_cast<ImTextureID>(static_cast<uintptr_t>(texture)),
+						plotMin, plotMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f));
+	}
+	else
+	{
+		const char* statusMsg = sourceReady
+			? (selectionActive ? "Building selection waveform..." : "Building waveform...")
+			: "Loading waveform...";
+		const ImVec2 statusSize = ImGui::CalcTextSize(statusMsg);
+		drawList->AddText(ImVec2(plotMin.x + (plotWidth - statusSize.x) * 0.5f,
+								plotMin.y + (plotHeight - statusSize.y) * 0.5f),
 							IM_COL32(170, 170, 170, 255), statusMsg);
-		}
+	}
 
-			if (valid)
+	hoverInfo = HoverInfo();
+	if (valid && planeData != nullptr && planeData->imageWidth > 0 && planeData->imageHeight > 0)
+	{
+		const ImVec2 mousePos = ImGui::GetIO().MousePos;
+		const bool hoveredPlot = mousePos.x >= plotMin.x
+			&& mousePos.x < plotMax.x
+			&& mousePos.y >= plotMin.y
+			&& mousePos.y < plotMax.y;
+		if (hoveredPlot)
+		{
+			const int sourceMinX = cachedSelectionActive ? std::clamp(cachedSelectionMinX, 0, static_cast<int>(planeData->imageWidth) - 1) : 0;
+			const int sourceMinY = cachedSelectionActive ? std::clamp(cachedSelectionMinY, 0, static_cast<int>(planeData->imageHeight) - 1) : 0;
+			const int sourceMaxX = cachedSelectionActive ? std::clamp(cachedSelectionMaxX, sourceMinX, static_cast<int>(planeData->imageWidth) - 1) : static_cast<int>(planeData->imageWidth) - 1;
+			const int sourceMaxY = cachedSelectionActive ? std::clamp(cachedSelectionMaxY, sourceMinY, static_cast<int>(planeData->imageHeight) - 1) : static_cast<int>(planeData->imageHeight) - 1;
+			const int sourceWidth = std::max(1, sourceMaxX - sourceMinX + 1);
+			const float normalizedX = std::clamp((mousePos.x - plotMin.x) / plotWidth, 0.0f, 1.0f);
+			const float normalizedY = std::clamp((plotMax.y - mousePos.y) / plotHeight, 0.0f, 1.0f);
+			const int sourceX = sourceMinX + static_cast<int>(std::round(normalizedX * static_cast<float>(sourceWidth - 1)));
+			const float targetLogValue = cachedMinLogValue + normalizedY * std::max(EPSILON, cachedMaxLogValue - cachedMinLogValue);
+
+			hoverInfo.active = true;
+			hoverInfo.paintMode = cachedPaintMode;
+			hoverInfo.sourceX = std::clamp(sourceX, sourceMinX, sourceMaxX);
+			hoverInfo.sourceMinY = sourceMinY;
+			hoverInfo.sourceMaxY = sourceMaxY;
+			hoverInfo.minLogValue = cachedMinLogValue;
+			hoverInfo.targetLogValue = targetLogValue;
+		}
+	}
+
+	if (valid && sampleOverlayInfo != nullptr && sampleOverlayInfo->active && planeData != nullptr && planeData->imageWidth > 0)
+	{
+		const int sourceMinX = cachedSelectionActive ? std::clamp(cachedSelectionMinX, 0, static_cast<int>(planeData->imageWidth) - 1) : 0;
+		const int sourceMaxX = cachedSelectionActive ? std::clamp(cachedSelectionMaxX, sourceMinX, static_cast<int>(planeData->imageWidth) - 1) : static_cast<int>(planeData->imageWidth) - 1;
+		if (sampleOverlayInfo->sourceX >= sourceMinX && sampleOverlayInfo->sourceX <= sourceMaxX)
+		{
+			const float normalizedX = (sourceMaxX > sourceMinX)
+				? static_cast<float>(sampleOverlayInfo->sourceX - sourceMinX) / static_cast<float>(sourceMaxX - sourceMinX)
+				: 0.0f;
+			const float plotX = plotMin.x + normalizedX * plotWidth;
+			const float logSpan = std::max(EPSILON, cachedMaxLogValue - cachedMinLogValue);
+			const bool showRgbOverlay = cachedPaintMode == PaintMode::Rgb && sampleOverlayInfo->isRgb && sampleOverlayInfo->channelCount >= 3;
+
+			auto drawHorizontalMarker = [&](float value, ImU32 color)
 			{
-				const float logSpan = std::max(EPSILON, cachedMaxLogValue - cachedMinLogValue);
-				const int firstStop = static_cast<int>(std::ceil(cachedMinLogValue));
-				const int lastStop = static_cast<int>(std::floor(cachedMaxLogValue));
-				const int stopStep = std::max(1, static_cast<int>(std::ceil(logSpan / static_cast<float>(horizontalDivisions))));
-				for (int stop = firstStop; stop <= lastStop; stop += stopStep)
+				if (!std::isfinite(value))
+					return;
+				const float normalized = std::clamp((toLogValue(value, cachedMinLogValue) - cachedMinLogValue) / logSpan, 0.0f, 1.0f);
+				const float y = plotMax.y - normalized * plotHeight;
+				drawList->AddLine(ImVec2(plotMin.x, y), ImVec2(plotMax.x, y), IM_COL32(0, 0, 0, 180), 1.0f);
+				drawList->AddLine(ImVec2(plotMin.x, y), ImVec2(plotMax.x, y), color, 0.5f);
+				drawList->AddCircleFilled(ImVec2(plotX, y), 1.2f, color);
+			};
+
+			ImU32 verticalColor = IM_COL32(240, 240, 220, 220);
+			if (!showRgbOverlay)
+			{
+				if (sampleOverlayInfo->isRgb && sampleOverlayInfo->channelCount >= 3)
 				{
-					const float normalized = std::clamp((static_cast<float>(stop) - cachedMinLogValue) / logSpan, 0.0f, 1.0f);
-					const float y = plotMax.y - normalized * plotHeight;
-					char label[32];
-					const float value = std::exp2(static_cast<float>(stop));
-					std::snprintf(label, sizeof(label), "%.3f", value);
-					const ImVec2 labelSize = ImGui::CalcTextSize(label);
+					if (cachedPaintMode == PaintMode::Red)
+						verticalColor = IM_COL32(255, 96, 96, 220);
+					else if (cachedPaintMode == PaintMode::Green)
+						verticalColor = IM_COL32(96, 255, 96, 220);
+					else if (cachedPaintMode == PaintMode::Blue)
+						verticalColor = IM_COL32(96, 160, 255, 220);
+				}
+			}
+
+			drawList->PushClipRect(plotMin, plotMax, true);
+			drawList->AddLine(ImVec2(plotX, plotMin.y), ImVec2(plotX, plotMax.y), IM_COL32(0, 0, 0, 180), 1.0f);
+			drawList->AddLine(ImVec2(plotX, plotMin.y), ImVec2(plotX, plotMax.y), verticalColor, 0.5f);
+
+			if (showRgbOverlay)
+			{
+				drawHorizontalMarker(sampleOverlayInfo->values[0], IM_COL32(255, 96, 96, 220));
+				drawHorizontalMarker(sampleOverlayInfo->values[1], IM_COL32(96, 255, 96, 220));
+				drawHorizontalMarker(sampleOverlayInfo->values[2], IM_COL32(96, 160, 255, 220));
+			}
+			else if (sampleOverlayInfo->isRgb && sampleOverlayInfo->channelCount >= 3)
+			{
+				float value = computeYuvLuma(sampleOverlayInfo->values[0], sampleOverlayInfo->values[1], sampleOverlayInfo->values[2]);
+				if (cachedPaintMode == PaintMode::Red)
+					value = sampleOverlayInfo->values[0];
+				else if (cachedPaintMode == PaintMode::Green)
+					value = sampleOverlayInfo->values[1];
+				else if (cachedPaintMode == PaintMode::Blue)
+					value = sampleOverlayInfo->values[2];
+				drawHorizontalMarker(value, verticalColor);
+			}
+			else if (sampleOverlayInfo->channelCount > 0)
+			{
+				drawHorizontalMarker(sampleOverlayInfo->values[0], verticalColor);
+			}
+			drawList->PopClipRect();
+		}
+	}
+
+	if (valid)
+	{
+		const float logSpan = std::max(EPSILON, cachedMaxLogValue - cachedMinLogValue);
+		const int firstStop = static_cast<int>(std::ceil(cachedMinLogValue));
+		const int lastStop = static_cast<int>(std::floor(cachedMaxLogValue));
+		const int stopStep = std::max(1, static_cast<int>(std::ceil(logSpan / static_cast<float>(horizontalDivisions))));
+		for (int stop = firstStop; stop <= lastStop; stop += stopStep)
+		{
+			const float normalized = std::clamp((static_cast<float>(stop) - cachedMinLogValue) / logSpan, 0.0f, 1.0f);
+			const float y = plotMax.y - normalized * plotHeight;
+			char label[32];
+			const float value = std::exp2(static_cast<float>(stop));
+			std::snprintf(label, sizeof(label), "%.3f", value);
+			const ImVec2 labelSize = ImGui::CalcTextSize(label);
 				drawList->AddText(ImVec2(frameMax.x - labelSize.x - 6.0f, y - labelSize.y * 0.5f),
 								IM_COL32(128, 136, 126, 220), label);
-			}
 		}
+	}
 
-		drawList->AddRect(plotMin, plotMax, IM_COL32(90, 96, 84, 180), 0.0f, 0, 1.0f);
-		drawList->AddLine(ImVec2(plotMax.x, plotMin.y), ImVec2(plotMax.x, plotMax.y), IM_COL32(90, 96, 84, 180), 1.0f);
+	drawList->AddRect(plotMin, plotMax, IM_COL32(90, 96, 84, 180), 0.0f, 0, 1.0f);
+	drawList->AddLine(ImVec2(plotMax.x, plotMin.y), ImVec2(plotMax.x, plotMax.y), IM_COL32(90, 96, 84, 180), 1.0f);
 	ImGui::End();
 	ImGui::PopStyleVar();
 	ImGui::PopStyleColor(2);

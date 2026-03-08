@@ -29,6 +29,26 @@ public:
 		Blue,
 	};
 
+	struct HoverInfo
+	{
+		bool active = false;
+		PaintMode paintMode = PaintMode::LuminanceYuv;
+		int sourceX = 0;
+		int sourceMinY = 0;
+		int sourceMaxY = 0;
+		float minLogValue = -8.0f;
+		float targetLogValue = 0.0f;
+	};
+
+	struct SampleOverlayInfo
+	{
+		bool active = false;
+		bool isRgb = false;
+		int channelCount = 0;
+		int sourceX = 0;
+		float values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+	};
+
 	/**
 	 * @brief Release cached waveform content and GPU resources.
 	 */
@@ -61,7 +81,10 @@ public:
 			int selectionMinX,
 			int selectionMinY,
 			int selectionMaxX,
-			int selectionMaxY);
+			int selectionMaxY,
+			const SampleOverlayInfo* sampleOverlayInfo);
+
+	const HoverInfo& getHoverInfo() const { return hoverInfo; }
 
 private:
 	struct BuildTask
@@ -155,6 +178,7 @@ private:
 	int cachedSelectionMinY = 0;
 	int cachedSelectionMaxX = 0;
 	int cachedSelectionMaxY = 0;
+	HoverInfo hoverInfo;
 
 	GLuint texture = 0;
 
