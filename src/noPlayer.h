@@ -105,7 +105,7 @@ private:
 		out vec4 FragColor;
 		void main() {
 			float dashed = (int(gl_FragCoord.x/3) + int(gl_FragCoord.y/3)) % 2;
-			FragColor = vec4(vec3(0.25), 0.75 * dashed);
+			FragColor = vec4(vec3(1.0) * dashed, 0.25);
 		}
 	)glsl";
 
