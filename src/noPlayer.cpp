@@ -807,17 +807,18 @@ void NoPlayer::draw()
 					| ImGuiWindowFlags_AlwaysAutoResize
 					| ImGuiWindowFlags_NoBackground;
 
+		const ImVec4 clrs[] = {
+			ImVec4(0.35f, 0.35f, 0.35f, 1.f),	// Not used
+			ImVec4(0.2f, 0.2f, 0.2f, 1.f),		// Not loaded yet
+			ImVec4(0.65f, 0.65f, 0.65f, 1.f),	// Loading now
+			ImVec4(0.5f, 0.5f, 0.5f, 1.f),		// Not used
+			ImVec4(0.5f, 0.5f, 0.5f, 1.f)		// Ready
+		};
+
 		ImGui::Begin( "AOVs", nullptr, windowFlags);
 		for (int n = 0; n < imagePlanes.size(); n++)
 		{
-
-			const ImVec4 clrs[] = {
-				ImVec4(0.35, 0.35, 0.35, 1),
-				ImVec4(0.2, 0.2, 0.2, 1),
-				ImVec4(0.65, 0.65, 0.65, 1),
-				ImVec4(0.5, 0.5, 0.5, 1),
-				ImVec4(0.5, 0.5, 0.5, 1)
-				};
+			// bit depth
 			ImGui::TextColored( clrs[imagePlanes[n].MIPs[activeMIP].ready], "%5s", imagePlanes[n].MIPs[activeMIP].format.c_str());
 			ImGui::SameLine();
 
@@ -826,6 +827,7 @@ void NoPlayer::draw()
 			else
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5, 0.5, 0.5, 1));
 
+			// Name from multipart - can be empty
 			ImGui::PushID(n);
 			if (ImGui::Selectable(imagePlanes[n].name.c_str(), activePlaneIdx == n))
 			{
@@ -839,13 +841,14 @@ void NoPlayer::draw()
 			else
 				ImGui::SameLine();
 
-
+			// Group name - can be empty
 			if (!imagePlanes[n].groupName.empty())
 			{
 				ImGui::Text("%s.", imagePlanes[n].groupName.c_str());
 				ImGui::SameLine(0, 0);
 			}
 
+			// Channel names
 			if(activePlaneIdx == n)
 			{
 				if (channelSoloing==0)
@@ -857,7 +860,9 @@ void NoPlayer::draw()
 					for (int i = 0; i < planeData.len; i++)
 					{
 						if (i) ImGui::SameLine(0, 0);
-						ImGui::TextColored( ((i+1)==channelSoloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1), imagePlanes[n].channels.substr(i, 1).c_str());
+						// Usually one character
+						ImGui::TextColored( ((i+1)==channelSoloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1),
+											(planeData.len==1) ? imagePlanes[n].channels.c_str() : imagePlanes[n].channels.substr(i, 1).c_str());
 					}
 				}
 			}
