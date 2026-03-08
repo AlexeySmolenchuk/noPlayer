@@ -1,6 +1,7 @@
 #pragma once
 
 #include "imagePlane.h"
+#include "waveformPanel.h"
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -289,6 +290,10 @@ private:
 	ImVec2 inspectRegionStart = ImVec2(0.0f, 0.0f);
 	/** Region selection end in image-space coordinates. */
 	ImVec2 inspectRegionEnd = ImVec2(0.0f, 0.0f);
+	/** Split-screen waveform analysis visibility toggle (shortcut `W`). */
+	bool waveformSplitView = false;
+	/** Helper owning waveform cache and drawing for split analysis mode. */
+	WaveformPanel waveformPanel;
 
 	/** Fullscreen UI mode toggle. */
 	bool fullScreen = false;

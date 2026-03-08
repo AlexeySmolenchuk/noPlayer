@@ -6,6 +6,7 @@ add_executable(noPlayer
     application.cpp
     imagePlane.cpp
     noPlayer.cpp
+    waveformPanel.cpp
     scanImageFile.cpp
     configureOCIO.cpp
     oglRoutine.cpp

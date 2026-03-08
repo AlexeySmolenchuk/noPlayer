@@ -379,6 +379,7 @@ NoPlayer::init(const char* fileName, bool fresh)
 		inspectRegionDragging = false;
 		inspectRegionMoved = false;
 	}
+	waveformPanel.invalidate();
 
 	std::unique_lock<std::mutex> lock(mtx);
 	loadingQueue.clear();
@@ -411,8 +412,8 @@ void NoPlayer::clear()
 	inspectRegionActive = false;
 	inspectRegionDragging = false;
 	inspectRegionMoved = false;
+	waveformPanel.invalidate();
 }
-
 
 void NoPlayer::bindOCIOTextures()
 {
@@ -443,6 +444,8 @@ void NoPlayer::releaseOCIOTextures()
 
 NoPlayer::~NoPlayer()
 {
+	waveformPanel.shutdownWorker();
+
 	// Signal worker shutdown and wait for thread exit.
 	{
 		std::lock_guard<std::mutex> lock(mtx);
@@ -458,6 +461,7 @@ NoPlayer::~NoPlayer()
 		// Free OCIO LUTs and image textures while context is active.
 		std::lock_guard<std::mutex> lock(mtx);
 		releaseOCIOTextures();
+		waveformPanel.releaseGlResources();
 		releasePlaneTextures(imagePlanes);
 		imagePlanes.clear();
 	}
@@ -712,15 +716,32 @@ void NoPlayer::draw()
 	static float factor = 1.0;
 	static ImVec2 shift(0, 0);
 
+	const int analysisPanelWidth = waveformSplitView
+		? std::max(1, displayW / 2)
+		: 0;
+	const int imageViewportX = analysisPanelWidth;
+	const int imageViewportY = 0;
+	const int imageViewportW = std::max(1, displayW - analysisPanelWidth);
+	const int imageViewportH = std::max(1, displayH);
+	const ImVec2 imageViewportCenter(imageViewportX + imageViewportW * 0.5f, imageViewportY + imageViewportH * 0.5f);
+
 	const float centerX = planeData.imageOffsetX + planeData.imageWidth * 0.5f
 						- planeData.windowOffsetX - planeData.windowWidth * 0.5f;
 	const float centerY = planeData.imageOffsetY + planeData.imageHeight * 0.5f
 						- planeData.windowOffsetY - planeData.windowHeight * 0.5f;
 
+	auto isPointInsideImageViewport = [&](const ImVec2& point)
+	{
+		return point.x >= imageViewportX
+			&& point.x < static_cast<float>(imageViewportX + imageViewportW)
+			&& point.y >= imageViewportY
+			&& point.y < static_cast<float>(imageViewportY + imageViewportH);
+	};
+
 	auto screenToImageCoords = [&](const ImVec2& screenCoords)
 	{
 		// Map cursor position from screen-space into image-space.
-		ImVec2 imageCoords = screenCoords - ImVec2(displayW, displayH) * 0.5f - ImVec2(offsetX, offsetY) + shift;
+		ImVec2 imageCoords = screenCoords - imageViewportCenter - ImVec2(offsetX, offsetY) + shift;
 		imageCoords /= ImVec2(planeData.pixelAspect, 1.0f) * scale * compensateMIP * factor;
 		imageCoords += ImVec2(planeData.imageWidth, planeData.imageHeight) * 0.5f - ImVec2(centerX, centerY);
 		return imageCoords;
@@ -731,16 +752,18 @@ void NoPlayer::draw()
 		// Map image-space coordinates back to screen-space for overlays.
 		ImVec2 screenCoords = imageCoords - ImVec2(planeData.imageWidth, planeData.imageHeight) * 0.5f + ImVec2(centerX, centerY);
 		screenCoords *= ImVec2(planeData.pixelAspect, 1.0f) * scale * compensateMIP * factor;
-		screenCoords += ImVec2(displayW, displayH) * 0.5f + ImVec2(offsetX, offsetY) - shift;
+		screenCoords += imageViewportCenter + ImVec2(offsetX, offsetY) - shift;
 		return screenCoords;
 	};
 
 	if (!io.WantCaptureMouse)
 	{
+		const ImVec2 mousePos = ImGui::GetMousePos();
+		const bool mouseInsideImageViewport = isPointInsideImageViewport(mousePos);
 		// Zoom around mouse cursor using wheel input.
-		if (io.MouseWheel!=0.0)
+		if (io.MouseWheel!=0.0 && mouseInsideImageViewport)
 		{
-			ImVec2 scalePivot = ImGui::GetMousePos() - ImVec2(displayW, displayH)/2.f - ImVec2(offsetX, offsetY);
+			ImVec2 scalePivot = mousePos - imageViewportCenter - ImVec2(offsetX, offsetY);
 			float factor = powf(2, io.MouseWheel/3.0f);
 			ImVec2 temp = scalePivot*(factor-1);
 			offsetX = offsetX - temp.x;
@@ -750,14 +773,14 @@ void NoPlayer::draw()
 		}
 
 		// Scale around RMB click pivot while dragging.
-		if (io.MouseDown[1])
+		if (io.MouseDown[1] && isPointInsideImageViewport(io.MouseClickedPos[1]))
 		{
 			ImVec2 delta = ImGui::GetMousePos() - io.MouseClickedPos[1];
 
 			float drag = (delta.x - delta.y) * 0.01f;
 			factor = powf( 2.f, drag / 3.0f);
 
-			ImVec2 scalePivot = io.MouseClickedPos[1] - ImVec2(displayW, displayH)/2.f - ImVec2(offsetX, offsetY);
+			ImVec2 scalePivot = io.MouseClickedPos[1] - imageViewportCenter - ImVec2(offsetX, offsetY);
 			shift = scalePivot * (factor - 1);
 		}
 		// Commit temporary scale transform when RMB is released.
@@ -772,14 +795,15 @@ void NoPlayer::draw()
 		}
 
 		// Pan view with MMB drag.
-		if (io.MouseDown[2])
+		if (io.MouseDown[2] && isPointInsideImageViewport(io.MousePos))
 		{
 			offsetX += ImGui::GetIO().MouseDelta.x;
 			offsetY += ImGui::GetIO().MouseDelta.y;
 		}
 
 		// Start inspector region selection on LMB click inside image.
-		if (inspect && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+		if (inspect && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
+			&& isPointInsideImageViewport(io.MouseClickedPos[ImGuiMouseButton_Left]))
 		{
 			const ImVec2 clickedCoords = screenToImageCoords(io.MouseClickedPos[ImGuiMouseButton_Left]);
 			if (isPointInsideImage(clickedCoords, planeData))
@@ -853,7 +877,7 @@ void NoPlayer::draw()
 			offsetX = 0.25;
 			offsetY = 0.25;
 			if (scale == 1.0/compensateMIP)
-				scale = std::min(float(displayH)/float(planeData.windowHeight), float(displayW)/float(planeData.windowWidth))/compensateMIP;
+				scale = std::min(float(imageViewportH)/float(planeData.windowHeight), float(imageViewportW)/float(planeData.windowWidth))/compensateMIP;
 			else
 				scale = 1.0f/compensateMIP;
 		}
@@ -862,6 +886,11 @@ void NoPlayer::draw()
 			ui = !ui;
 		if (ImGui::IsKeyPressed(ImGuiKey_O))
 			ocioPickerVisible = !ocioPickerVisible;
+		if (ImGui::IsKeyPressed(ImGuiKey_W))
+		{
+			waveformSplitView = !waveformSplitView;
+			waveformPanel.invalidate();
+		}
 
 		if (ImGui::IsKeyPressed(ImGuiKey_0))
 		{
@@ -991,6 +1020,7 @@ void NoPlayer::draw()
 				"F             Fit / 100%%\n\n"
 				"I             Inspect Tool\n\n"
 				"O             OCIO Display/View picker\n\n"
+				"W             Split Waveform View\n\n"
 				"F5            Reload image\n\n"
 				"F11           Fullscreen\n\n"
 				"H             Hide UI\n\n"
@@ -1312,11 +1342,26 @@ void NoPlayer::draw()
 		}
 	}
 
+		const bool waveformSourceReady = planeReady >= ImagePlaneData::LOADED;
+		if (waveformSplitView)
+		{
+			waveformPanel.draw(analysisPanelWidth,
+								displayH,
+								unit,
+								waveformSourceReady,
+								waveformSourceReady ? &planeData : nullptr,
+								activePlaneIdx,
+								activeMIP,
+								queueGeneration);
+		}
+
 	if (planeReady != ImagePlaneData::TEXTURE_GENERATED)
 	{
 		// Show loading indicator until texture upload is complete.
 		const char* message = "Loading...";
-		ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(message))/2.f);
+		const ImVec2 imageCenter = ImVec2(static_cast<float>(imageViewportX + imageViewportW * 0.5f),
+										static_cast<float>(imageViewportY + imageViewportH * 0.5f));
+		ImGui::SetNextWindowPos(imageCenter - ImGui::CalcTextSize(message) * 0.5f);
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 									| ImGuiWindowFlags_NoBackground
 									| ImGuiWindowFlags_AlwaysAutoResize;
@@ -1330,7 +1375,7 @@ void NoPlayer::draw()
 		// Draw inspector popup with cursor or region average values.
 		const ImVec2 mousePos = ImGui::GetMousePos();
 		const ImVec2 coords = screenToImageCoords(mousePos);
-		const bool cursorInsideImage = isPointInsideImage(coords, planeData);
+		const bool cursorInsideImage = isPointInsideImageViewport(mousePos) && isPointInsideImage(coords, planeData);
 
 		int selectionMinX = 0;
 		int selectionMinY = 0;
@@ -1480,14 +1525,19 @@ void NoPlayer::draw()
 			const ImVec2 screenMax(std::max(p0.x, p1.x), std::max(p0.y, p1.y));
 
 			ImDrawList* drawList = ImGui::GetForegroundDrawList();
+			drawList->PushClipRect(ImVec2(static_cast<float>(imageViewportX), static_cast<float>(imageViewportY)),
+								ImVec2(static_cast<float>(imageViewportX + imageViewportW),
+										static_cast<float>(imageViewportY + imageViewportH)),
+								true);
 			drawList->AddRect(screenMin, screenMax, IM_COL32(255, 210, 80, 220), 0.0f, 0, 1.5f);
+			drawList->PopClipRect();
 		}
 	}
 
 	ImGui::Render();
 
 	// Render the image quad and optional display-window frame.
-	glViewport(0, 0, displayW, displayH);
+	glViewport(imageViewportX, imageViewportY, imageViewportW, imageViewportH);
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
 	const bool renderSoloMode = canRenderSoloMode(channelSoloing, planeData);
@@ -1496,10 +1546,10 @@ void NoPlayer::draw()
 		// Push per-frame uniforms and draw image texture.
 		glUseProgram(shader);
 
-		glUniform2f(glGetUniformLocation(shader, "offset"),  (offsetX - shift.x + centerX * scale * factor * compensateMIP)/(float)displayW,
-															-(offsetY - shift.y + centerY * scale * factor * compensateMIP)/(float)displayH);
-		glUniform2f(glGetUniformLocation(shader, "scale"),  scale * factor * compensateMIP * planeData.imageWidth/(float)displayW * planeData.pixelAspect,
-															scale * factor * compensateMIP * planeData.imageHeight/(float)displayH);
+		glUniform2f(glGetUniformLocation(shader, "offset"),  (offsetX - shift.x + centerX * scale * factor * compensateMIP)/(float)imageViewportW,
+															-(offsetY - shift.y + centerY * scale * factor * compensateMIP)/(float)imageViewportH);
+		glUniform2f(glGetUniformLocation(shader, "scale"),  scale * factor * compensateMIP * planeData.imageWidth/(float)imageViewportW * planeData.pixelAspect,
+															scale * factor * compensateMIP * planeData.imageHeight/(float)imageViewportH);
 
 		glUniform1f(glGetUniformLocation(shader, "gainValues"), plane.gainValues);
 		glUniform1f(glGetUniformLocation(shader, "offsetValues"), plane.offsetValues);
@@ -1531,16 +1581,17 @@ void NoPlayer::draw()
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 		glUseProgram(frameShader);
-		glUniform2f(glGetUniformLocation(frameShader, "offset"), (offsetX - shift.x)/(float)displayW,
-																-(offsetY - shift.y)/(float)displayH);
-		glUniform2f(glGetUniformLocation(frameShader, "scale"), scale * factor * compensateMIP * planeData.windowWidth/(float)displayW * planeData.pixelAspect,
-																scale * factor * compensateMIP * planeData.windowHeight/(float)displayH);
+		glUniform2f(glGetUniformLocation(frameShader, "offset"), (offsetX - shift.x)/(float)imageViewportW,
+																-(offsetY - shift.y)/(float)imageViewportH);
+		glUniform2f(glGetUniformLocation(frameShader, "scale"), scale * factor * compensateMIP * planeData.windowWidth/(float)imageViewportW * planeData.pixelAspect,
+																scale * factor * compensateMIP * planeData.windowHeight/(float)imageViewportH);
 		glBindVertexArray(VAO);
 		glDrawArrays(GL_LINE_LOOP, 0, 4);
 		glBindVertexArray(0);
 		glUseProgram(0);
 	}
 
+	glViewport(0, 0, displayW, displayH);
 	ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 	glfwSwapBuffers(mainWindow);
 }
