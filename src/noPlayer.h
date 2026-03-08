@@ -292,6 +292,8 @@ private:
 	ImVec2 inspectRegionEnd = ImVec2(0.0f, 0.0f);
 	/** Split-screen waveform analysis visibility toggle (shortcut `W`). */
 	bool waveformSplitView = false;
+	/** Width fraction used by the split waveform pane when enabled. */
+	float waveformSplitRatio = 0.5f;
 	/** Helper owning waveform cache and drawing for split analysis mode. */
 	WaveformPanel waveformPanel;
 

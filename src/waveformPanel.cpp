@@ -30,8 +30,9 @@ float computeIntensity(std::uint32_t count, std::uint32_t maxCount)
 	return std::sqrt(std::clamp(normalized, 0.0f, 1.0f));
 }
 
-float computeLuminance(float red, float green, float blue)
+float computeYuvLuma(float red, float green, float blue)
 {
+	// Y' only: BT.709 luma from RGB. Chroma (U/V) is intentionally not part of this mode.
 	return 0.2126f * red + 0.7152f * green + 0.0722f * blue;
 }
 
@@ -178,6 +179,11 @@ void WaveformPanel::invalidate()
 		requestedPlotWidth = 0;
 		requestedPlotHeight = 0;
 		requestedPaintMode = currentPaintMode;
+		requestedSelectionActive = false;
+		requestedSelectionMinX = 0;
+		requestedSelectionMinY = 0;
+		requestedSelectionMaxX = 0;
+		requestedSelectionMaxY = 0;
 	}
 
 	valid = false;
@@ -192,6 +198,11 @@ void WaveformPanel::invalidate()
 	cachedPlotWidth = 0;
 	cachedPlotHeight = 0;
 	cachedPaintMode = currentPaintMode;
+	cachedSelectionActive = false;
+	cachedSelectionMinX = 0;
+	cachedSelectionMinY = 0;
+	cachedSelectionMaxX = 0;
+	cachedSelectionMaxY = 0;
 	releaseGlResources();
 }
 
@@ -228,7 +239,12 @@ bool WaveformPanel::isValidFor(int planeIdx,
 							   std::uint64_t generation,
 							   int plotWidth,
 							   int plotHeight,
-							   PaintMode paintMode) const
+							   PaintMode paintMode,
+							   bool selectionActive,
+							   int selectionMinX,
+							   int selectionMinY,
+							   int selectionMaxX,
+							   int selectionMaxY) const
 {
 	return valid
 		&& cachedPlaneIdx == planeIdx
@@ -236,7 +252,12 @@ bool WaveformPanel::isValidFor(int planeIdx,
 		&& cachedGeneration == generation
 		&& cachedPlotWidth == plotWidth
 		&& cachedPlotHeight == plotHeight
-		&& cachedPaintMode == paintMode;
+		&& cachedPaintMode == paintMode
+		&& cachedSelectionActive == selectionActive
+		&& cachedSelectionMinX == selectionMinX
+		&& cachedSelectionMinY == selectionMinY
+		&& cachedSelectionMaxX == selectionMaxX
+		&& cachedSelectionMaxY == selectionMaxY;
 }
 
 
@@ -251,6 +272,11 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 	result.plotHeight = std::max(1, task.plotHeight);
 	result.paintMode = task.paintMode;
 	result.serial = task.serial;
+	result.selectionActive = task.selectionActive;
+	result.selectionMinX = task.selectionMinX;
+	result.selectionMinY = task.selectionMinY;
+	result.selectionMaxX = task.selectionMaxX;
+	result.selectionMaxY = task.selectionMaxY;
 
 	if (!task.pixels || task.imageWidth <= 0 || task.imageHeight <= 0 || task.channelCount <= 0)
 		return result;
@@ -261,23 +287,28 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 	const int scopeWidth = result.plotWidth;
 	const int scopeHeight = result.plotHeight;
 	const size_t histogramSize = static_cast<size_t>(scopeWidth) * static_cast<size_t>(scopeHeight);
+	const int sourceMinX = task.selectionActive ? std::clamp(task.selectionMinX, 0, task.imageWidth - 1) : 0;
+	const int sourceMinY = task.selectionActive ? std::clamp(task.selectionMinY, 0, task.imageHeight - 1) : 0;
+	const int sourceMaxX = task.selectionActive ? std::clamp(task.selectionMaxX, sourceMinX, task.imageWidth - 1) : task.imageWidth - 1;
+	const int sourceMaxY = task.selectionActive ? std::clamp(task.selectionMaxY, sourceMinY, task.imageHeight - 1) : task.imageHeight - 1;
+	const int sourceWidth = sourceMaxX - sourceMinX + 1;
 
 	std::vector<std::uint32_t> histogramRed(histogramSize, 0u);
 	std::vector<std::uint32_t> histogramGreen(histogramSize, 0u);
 	std::vector<std::uint32_t> histogramBlue(histogramSize, 0u);
 	std::vector<std::uint32_t> histogramWhite(histogramSize, 0u);
-	std::vector<int> xBins(static_cast<size_t>(task.imageWidth), 0);
+	std::vector<int> xBins(static_cast<size_t>(sourceWidth), 0);
 
-	for (int x = 0; x < task.imageWidth; x++)
+	for (int x = 0; x < sourceWidth; x++)
 	{
-		if (scopeWidth <= 1 || task.imageWidth <= 1)
+		if (scopeWidth <= 1 || sourceWidth <= 1)
 		{
 			xBins[static_cast<size_t>(x)] = 0;
 			continue;
 		}
 
 		const long long numerator = static_cast<long long>(x) * static_cast<long long>(scopeWidth - 1);
-		xBins[static_cast<size_t>(x)] = static_cast<int>(numerator / static_cast<long long>(task.imageWidth - 1));
+		xBins[static_cast<size_t>(x)] = static_cast<int>(numerator / static_cast<long long>(sourceWidth - 1));
 	}
 
 	const precision* pixels = task.pixels.get();
@@ -286,9 +317,9 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 	float minPositiveValue = std::numeric_limits<float>::max();
 	float maxPositiveValue = std::numeric_limits<float>::lowest();
 
-	for (int y = 0; y < task.imageHeight; y++)
+	for (int y = sourceMinY; y <= sourceMaxY; y++)
 	{
-		for (int x = 0; x < task.imageWidth; x++)
+		for (int x = sourceMinX; x <= sourceMaxX; x++)
 		{
 			const size_t pixelOffset = (static_cast<size_t>(y) * static_cast<size_t>(task.imageWidth) + static_cast<size_t>(x))
 									 * static_cast<size_t>(task.channelCount);
@@ -331,7 +362,7 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 					const float blue = static_cast<float>(pixels[pixelOffset + 2]);
 					if (!std::isfinite(red) || !std::isfinite(green) || !std::isfinite(blue))
 						continue;
-					value = computeLuminance(red, green, blue);
+					value = computeYuvLuma(red, green, blue);
 				}
 
 				if (!std::isfinite(value))
@@ -380,10 +411,11 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 	std::uint32_t maxCountBlue = 0u;
 	std::uint32_t maxCountWhite = 0u;
 
-	for (int y = 0; y < task.imageHeight; y++)
+	for (int y = sourceMinY; y <= sourceMaxY; y++)
 	{
-		for (int x = 0; x < task.imageWidth; x++)
+		for (int x = sourceMinX; x <= sourceMaxX; x++)
 		{
+			const int localX = x - sourceMinX;
 			const size_t pixelOffset = (static_cast<size_t>(y) * static_cast<size_t>(task.imageWidth) + static_cast<size_t>(x))
 									 * static_cast<size_t>(task.channelCount);
 			if (showRgbChannels)
@@ -397,7 +429,7 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 					const float normalized = std::clamp((toLogValue(value, minLogValue) - minLogValue) / logValueRange, 0.0f, 1.0f);
 					const int binY = std::clamp(static_cast<int>(std::round(normalized * static_cast<float>(lastScopeRow))),
 												0, lastScopeRow);
-					const int binX = xBins[static_cast<size_t>(x)];
+						const int binX = xBins[static_cast<size_t>(localX)];
 					const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(binX);
 
 					if (channel == 0)
@@ -426,7 +458,7 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 				const float normalized = std::clamp((toLogValue(value, minLogValue) - minLogValue) / logValueRange, 0.0f, 1.0f);
 				const int binY = std::clamp(static_cast<int>(std::round(normalized * static_cast<float>(lastScopeRow))),
 											0, lastScopeRow);
-				const int binX = xBins[static_cast<size_t>(x)];
+					const int binX = xBins[static_cast<size_t>(localX)];
 				const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(binX);
 				histogramWhite[index]++;
 				maxCountWhite = std::max(maxCountWhite, histogramWhite[index]);
@@ -441,7 +473,7 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 					const float blue = static_cast<float>(pixels[pixelOffset + 2]);
 					if (!std::isfinite(red) || !std::isfinite(green) || !std::isfinite(blue))
 						continue;
-					value = computeLuminance(red, green, blue);
+					value = computeYuvLuma(red, green, blue);
 				}
 
 				if (!std::isfinite(value))
@@ -450,7 +482,7 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 				const float normalized = std::clamp((toLogValue(value, minLogValue) - minLogValue) / logValueRange, 0.0f, 1.0f);
 				const int binY = std::clamp(static_cast<int>(std::round(normalized * static_cast<float>(lastScopeRow))),
 											0, lastScopeRow);
-				const int binX = xBins[static_cast<size_t>(x)];
+					const int binX = xBins[static_cast<size_t>(localX)];
 				const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(binX);
 				histogramWhite[index]++;
 				maxCountWhite = std::max(maxCountWhite, histogramWhite[index]);
@@ -542,7 +574,12 @@ void WaveformPanel::workerLoop()
 			|| task.generation != requestedGeneration
 			|| task.plotWidth != requestedPlotWidth
 			|| task.plotHeight != requestedPlotHeight
-			|| task.paintMode != requestedPaintMode)
+			|| task.paintMode != requestedPaintMode
+			|| task.selectionActive != requestedSelectionActive
+			|| task.selectionMinX != requestedSelectionMinX
+			|| task.selectionMinY != requestedSelectionMinY
+			|| task.selectionMaxX != requestedSelectionMaxX
+			|| task.selectionMaxY != requestedSelectionMaxY)
 		{
 			continue;
 		}
@@ -558,7 +595,12 @@ void WaveformPanel::requestBuild(const ImagePlaneData& planeData,
 								 int mipIdx,
 								 std::uint64_t generation,
 								 int plotWidth,
-								 int plotHeight)
+								 int plotHeight,
+								 bool selectionActive,
+								 int selectionMinX,
+								 int selectionMinY,
+								 int selectionMaxX,
+								 int selectionMaxY)
 {
 	if (!planeData.pixels || planeData.imageWidth == 0 || planeData.imageHeight == 0 || planeData.len <= 0)
 		return;
@@ -566,13 +608,19 @@ void WaveformPanel::requestBuild(const ImagePlaneData& planeData,
 	if (valid && (cachedPlaneIdx != planeIdx
 		|| cachedMipIdx != mipIdx
 		|| cachedGeneration != generation
-		|| cachedPaintMode != currentPaintMode))
+		|| cachedPaintMode != currentPaintMode
+		|| cachedSelectionActive != selectionActive
+		|| cachedSelectionMinX != selectionMinX
+		|| cachedSelectionMinY != selectionMinY
+		|| cachedSelectionMaxX != selectionMaxX
+		|| cachedSelectionMaxY != selectionMaxY))
 	{
 		valid = false;
 		releaseGlResources();
 	}
 
-	if (isValidFor(planeIdx, mipIdx, generation, plotWidth, plotHeight, currentPaintMode))
+	if (isValidFor(planeIdx, mipIdx, generation, plotWidth, plotHeight, currentPaintMode,
+				selectionActive, selectionMinX, selectionMinY, selectionMaxX, selectionMaxY))
 		return;
 
 	BuildTask task;
@@ -581,6 +629,11 @@ void WaveformPanel::requestBuild(const ImagePlaneData& planeData,
 	task.imageHeight = static_cast<int>(planeData.imageHeight);
 	task.channelCount = planeData.len;
 	task.isRgb = isRgbChannels(planeData.channels) && planeData.len >= 3;
+	task.selectionActive = selectionActive;
+	task.selectionMinX = selectionMinX;
+	task.selectionMinY = selectionMinY;
+	task.selectionMaxX = selectionMaxX;
+	task.selectionMaxY = selectionMaxY;
 	task.planeIdx = planeIdx;
 	task.mipIdx = mipIdx;
 	task.generation = generation;
@@ -595,7 +648,12 @@ void WaveformPanel::requestBuild(const ImagePlaneData& planeData,
 			&& requestedGeneration == generation
 			&& requestedPlotWidth == plotWidth
 			&& requestedPlotHeight == plotHeight
-			&& requestedPaintMode == currentPaintMode)
+			&& requestedPaintMode == currentPaintMode
+			&& requestedSelectionActive == selectionActive
+			&& requestedSelectionMinX == selectionMinX
+			&& requestedSelectionMinY == selectionMinY
+			&& requestedSelectionMaxX == selectionMaxX
+			&& requestedSelectionMaxY == selectionMaxY)
 		{
 			return;
 		}
@@ -608,6 +666,11 @@ void WaveformPanel::requestBuild(const ImagePlaneData& planeData,
 		requestedPlotWidth = plotWidth;
 		requestedPlotHeight = plotHeight;
 		requestedPaintMode = currentPaintMode;
+		requestedSelectionActive = selectionActive;
+		requestedSelectionMinX = selectionMinX;
+		requestedSelectionMinY = selectionMinY;
+		requestedSelectionMaxX = selectionMaxX;
+		requestedSelectionMaxY = selectionMaxY;
 		pendingTask = std::move(task);
 		hasPendingTask = true;
 	}
@@ -630,7 +693,12 @@ void WaveformPanel::consumeReadyResult()
 			|| readyResult.generation != requestedGeneration
 			|| readyResult.plotWidth != requestedPlotWidth
 			|| readyResult.plotHeight != requestedPlotHeight
-			|| readyResult.paintMode != requestedPaintMode)
+			|| readyResult.paintMode != requestedPaintMode
+			|| readyResult.selectionActive != requestedSelectionActive
+			|| readyResult.selectionMinX != requestedSelectionMinX
+			|| readyResult.selectionMinY != requestedSelectionMinY
+			|| readyResult.selectionMaxX != requestedSelectionMaxX
+			|| readyResult.selectionMaxY != requestedSelectionMaxY)
 		{
 			hasReadyResult = false;
 			return;
@@ -674,6 +742,11 @@ void WaveformPanel::consumeReadyResult()
 	cachedPlotWidth = result.plotWidth;
 	cachedPlotHeight = result.plotHeight;
 	cachedPaintMode = result.paintMode;
+	cachedSelectionActive = result.selectionActive;
+	cachedSelectionMinX = result.selectionMinX;
+	cachedSelectionMinY = result.selectionMinY;
+	cachedSelectionMaxX = result.selectionMaxX;
+	cachedSelectionMaxY = result.selectionMaxY;
 }
 
 
@@ -684,7 +757,12 @@ void WaveformPanel::draw(int panelWidth,
 						 const ImagePlaneData* planeData,
 						 int planeIdx,
 						 int mipIdx,
-						 std::uint64_t generation)
+						 std::uint64_t generation,
+						 bool selectionActive,
+						 int selectionMinX,
+						 int selectionMinY,
+						 int selectionMaxX,
+						 int selectionMaxY)
 {
 	(void)unit;
 
@@ -693,21 +771,19 @@ void WaveformPanel::draw(int panelWidth,
 	ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoMove
 								| ImGuiWindowFlags_NoResize
 								| ImGuiWindowFlags_NoCollapse
+								| ImGuiWindowFlags_NoTitleBar
 								| ImGuiWindowFlags_NoSavedSettings;
 	ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.07f, 0.07f, 0.07f, 0.98f));
 	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.86f, 0.86f, 0.86f, 1.0f));
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6.0f, 6.0f));
 	ImGui::Begin("Waveform", nullptr, windowFlags);
-		ImGui::AlignTextToFramePadding();
-		ImGui::TextUnformatted("Paint mode:");
-		ImGui::SameLine();
 		ImGui::SetNextItemWidth(-1.0f);
-			if (ImGui::BeginCombo("##paint_mode", paintModeLabel(currentPaintMode)))
+		if (ImGui::BeginCombo("##paint_mode", paintModeLabel(currentPaintMode)))
+		{
+			for (int modeIndex = 0; modeIndex < 5; modeIndex++)
 			{
-				for (int modeIndex = 0; modeIndex < 5; modeIndex++)
-				{
-					const PaintMode mode = static_cast<PaintMode>(modeIndex);
-					const bool selected = currentPaintMode == mode;
+				const PaintMode mode = static_cast<PaintMode>(modeIndex);
+				const bool selected = currentPaintMode == mode;
 				if (ImGui::Selectable(paintModeLabel(mode), selected))
 				{
 					currentPaintMode = mode;
@@ -719,12 +795,9 @@ void WaveformPanel::draw(int panelWidth,
 			ImGui::EndCombo();
 		}
 
-		ImGui::Separator();
-
-		const float tabsHeight = ImGui::GetFrameHeightWithSpacing() + 2.0f;
 		const float axisWidth = 44.0f;
 		const ImVec2 available = ImGui::GetContentRegionAvail();
-		const ImVec2 plotButtonSize(std::max(1.0f, available.x), std::max(80.0f, available.y - tabsHeight));
+		const ImVec2 plotButtonSize(std::max(1.0f, available.x), std::max(80.0f, available.y));
 		ImGui::InvisibleButton("WaveformPlot", plotButtonSize);
 
 		const ImVec2 frameMin = ImGui::GetItemRectMin();
@@ -734,11 +807,13 @@ void WaveformPanel::draw(int panelWidth,
 		const float plotWidth = std::max(1.0f, plotMax.x - plotMin.x);
 		const float plotHeight = std::max(1.0f, plotMax.y - plotMin.y);
 		const int plotTextureWidth = std::max(1, static_cast<int>(std::round(plotWidth)));
-		const int plotTextureHeight = std::max(1, static_cast<int>(std::round(plotHeight)));
+			const int plotTextureHeight = std::max(1, static_cast<int>(std::round(plotHeight)));
 
-		if (sourceReady && planeData != nullptr)
-			requestBuild(*planeData, planeIdx, mipIdx, generation, plotTextureWidth, plotTextureHeight);
-		consumeReadyResult();
+			if (sourceReady && planeData != nullptr)
+				requestBuild(*planeData, planeIdx, mipIdx, generation,
+							plotTextureWidth, plotTextureHeight,
+							selectionActive, selectionMinX, selectionMinY, selectionMaxX, selectionMaxY);
+			consumeReadyResult();
 
 			ImDrawList* drawList = ImGui::GetWindowDrawList();
 			drawList->AddRectFilled(frameMin, frameMax, IM_COL32(15, 15, 15, 255));
@@ -779,9 +854,11 @@ void WaveformPanel::draw(int panelWidth,
 				drawList->AddImage(static_cast<ImTextureID>(static_cast<uintptr_t>(texture)),
 								plotMin, plotMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f));
 		}
-		else
-		{
-			const char* statusMsg = sourceReady ? "Building waveform..." : "Loading waveform...";
+			else
+			{
+				const char* statusMsg = sourceReady
+					? (selectionActive ? "Building selection waveform..." : "Building waveform...")
+					: "Loading waveform...";
 			const ImVec2 statusSize = ImGui::CalcTextSize(statusMsg);
 			drawList->AddText(ImVec2(plotMin.x + (plotWidth - statusSize.x) * 0.5f,
 									plotMin.y + (plotHeight - statusSize.y) * 0.5f),
@@ -809,18 +886,6 @@ void WaveformPanel::draw(int panelWidth,
 
 		drawList->AddRect(plotMin, plotMax, IM_COL32(90, 96, 84, 180), 0.0f, 0, 1.0f);
 		drawList->AddLine(ImVec2(plotMax.x, plotMin.y), ImVec2(plotMax.x, plotMax.y), IM_COL32(90, 96, 84, 180), 1.0f);
-
-		if (valid)
-			ImGui::Text("Range %.3f .. %.3f  Log", cachedMinValue, cachedMaxValue);
-		else
-			ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeight()));
-
-		ImGui::Dummy(ImVec2(0.0f, 4.0f));
-		ImGui::Selectable("Waveform", true, 0, ImVec2(0.0f, 0.0f));
-		ImGui::SameLine();
-		ImGui::BeginDisabled();
-		ImGui::Selectable("RGB Parade", false, 0, ImVec2(0.0f, 0.0f));
-		ImGui::EndDisabled();
 	ImGui::End();
 	ImGui::PopStyleVar();
 	ImGui::PopStyleColor(2);
@@ -831,8 +896,8 @@ const char* WaveformPanel::paintModeLabel(PaintMode mode)
 {
 	switch (mode)
 	{
-	case PaintMode::White:
-		return "White";
+	case PaintMode::LuminanceYuv:
+		return "Luminance - YUV";
 	case PaintMode::Rgb:
 		return "RGB";
 	case PaintMode::Red:
@@ -842,7 +907,7 @@ const char* WaveformPanel::paintModeLabel(PaintMode mode)
 	case PaintMode::Blue:
 		return "B";
 	}
-	return "White";
+	return "Luminance - YUV";
 }
 
 

@@ -716,14 +716,27 @@ void NoPlayer::draw()
 	static float factor = 1.0;
 	static ImVec2 shift(0, 0);
 
-	const int analysisPanelWidth = waveformSplitView
-		? std::max(1, displayW / 2)
-		: 0;
-	const int imageViewportX = analysisPanelWidth;
-	const int imageViewportY = 0;
-	const int imageViewportW = std::max(1, displayW - analysisPanelWidth);
-	const int imageViewportH = std::max(1, displayH);
-	const ImVec2 imageViewportCenter(imageViewportX + imageViewportW * 0.5f, imageViewportY + imageViewportH * 0.5f);
+		const int splitterWidthPx = std::max(1, static_cast<int>(std::round(std::max(6.0f, unit))));
+		const int splitterLeftPadding = splitterWidthPx / 2;
+		const int splitterRightPadding = splitterWidthPx - splitterLeftPadding;
+		const int availableSplitWidth = std::max(1, displayW - splitterWidthPx);
+		const int minSplitPaneWidth = std::min(std::max(160, static_cast<int>(24.0f * unit)), std::max(1, availableSplitWidth / 2));
+		const int minDividerCenterX = minSplitPaneWidth + splitterLeftPadding;
+		const int maxDividerCenterX = std::max(minDividerCenterX, displayW - minSplitPaneWidth - splitterRightPadding);
+		const int dividerCenterX = waveformSplitView
+			? std::clamp(static_cast<int>(std::round(static_cast<float>(displayW) * waveformSplitRatio)),
+						minDividerCenterX,
+						maxDividerCenterX)
+			: 0;
+		const int analysisPanelWidth = waveformSplitView ? std::max(1, dividerCenterX - splitterLeftPadding) : 0;
+		const int imageViewportX = waveformSplitView ? std::min(displayW - 1, dividerCenterX + splitterRightPadding) : 0;
+		const int imageViewportY = 0;
+		const int imageViewportW = std::max(1, displayW - imageViewportX);
+		const int imageViewportH = std::max(1, displayH);
+		const ImVec2 imageViewportCenter(imageViewportX + imageViewportW * 0.5f, imageViewportY + imageViewportH * 0.5f);
+		const float imageViewportCenterX = static_cast<float>(imageViewportX) + static_cast<float>(imageViewportW) * 0.5f;
+		const float imageViewportRight = static_cast<float>(imageViewportX + imageViewportW);
+		const float imageViewportBottom = static_cast<float>(imageViewportY + imageViewportH);
 
 	const float centerX = planeData.imageOffsetX + planeData.imageWidth * 0.5f
 						- planeData.windowOffsetX - planeData.windowWidth * 0.5f;
@@ -1046,7 +1059,7 @@ void NoPlayer::draw()
 	else if (ui)
 	{
 		// Draw metadata, AOV list, and grading controls.
-		ImGui::SetNextWindowPos(ImVec2(unit, unit));
+		ImGui::SetNextWindowPos(ImVec2(static_cast<float>(imageViewportX) + unit, unit));
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 									| ImGuiWindowFlags_AlwaysAutoResize
 									| ImGuiWindowFlags_NoBackground;
@@ -1119,8 +1132,8 @@ void NoPlayer::draw()
 		ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(1.0, 1.0, 1.0, 0.1));
 		ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(1.0, 1.0, 1.0, 0.0));
 
-		ImGui::SetNextWindowPos(ImVec2(unit, unit*14));
-		ImGui::SetNextWindowSizeConstraints(ImVec2(-1, 0), ImVec2(-1, displayH - 19*unit));
+		ImGui::SetNextWindowPos(ImVec2(static_cast<float>(imageViewportX) + unit, unit*14));
+		ImGui::SetNextWindowSizeConstraints(ImVec2(-1, 0), ImVec2(-1, imageViewportH - 19*unit));
 
 		windowFlags = ImGuiWindowFlags_None
 					| ImGuiWindowFlags_NoDecoration
@@ -1219,8 +1232,11 @@ void NoPlayer::draw()
 			// Anchor picker on right-middle side of the screen.
 			const float pickerWidth = 40.0f * unit;
 			const float pickerRightMargin = 4.0f * unit;
-			ImGui::SetNextWindowPos(ImVec2(displayW - pickerRightMargin, displayH * 0.5f), ImGuiCond_Always, ImVec2(1.0f, 0.5f));
-			ImGui::SetNextWindowSizeConstraints(ImVec2(pickerWidth, 0), ImVec2(pickerWidth, displayH - 8 * unit));
+				ImGui::SetNextWindowPos(ImVec2(imageViewportRight - pickerRightMargin,
+											static_cast<float>(imageViewportY) + static_cast<float>(imageViewportH) * 0.5f),
+										ImGuiCond_Always,
+										ImVec2(1.0f, 0.5f));
+				ImGui::SetNextWindowSizeConstraints(ImVec2(pickerWidth, 0), ImVec2(pickerWidth, imageViewportH - 8 * unit));
 
 			windowFlags = ImGuiWindowFlags_None
 						| ImGuiWindowFlags_NoDecoration
@@ -1312,7 +1328,7 @@ void NoPlayer::draw()
 										| ImGuiWindowFlags_NoBackground
 										;
 
-			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 34*unit, displayH - 5*unit));
+				ImGui::SetNextWindowPos(ImVec2(imageViewportCenterX - 34*unit, imageViewportBottom - 5*unit));
 			ImGui::SetNextWindowSize(ImVec2(23*unit, 0));
 
 			ImGui::Begin( "Gain", nullptr, windowFlags);
@@ -1321,7 +1337,7 @@ void NoPlayer::draw()
 			ImGui::End();
 
 
-			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 10*unit, displayH - 5*unit));
+				ImGui::SetNextWindowPos(ImVec2(imageViewportCenterX - 10*unit, imageViewportBottom - 5*unit));
 			ImGui::SetNextWindowSize(ImVec2(23*unit, 0));
 
 			ImGui::Begin( "Offset", nullptr, windowFlags);
@@ -1329,7 +1345,7 @@ void NoPlayer::draw()
 			ImGui::DragFloat("Offset", &(plane.offsetValues), std::fmax(0.0001f, std::fabs(plane.offsetValues)*0.01f), 0, 0, "%g");
 			ImGui::End();
 
-			ImGui::SetNextWindowPos(ImVec2(displayW/2 + 14*unit, displayH - 5*unit));
+				ImGui::SetNextWindowPos(ImVec2(imageViewportCenterX + 14*unit, imageViewportBottom - 5*unit));
 			ImGui::SetNextWindowSize(ImVec2(23*unit, 0));
 
 			ImGui::Begin( "OCIO", nullptr, windowFlags);
@@ -1342,6 +1358,19 @@ void NoPlayer::draw()
 		}
 	}
 
+		int waveformSelectionMinX = 0;
+		int waveformSelectionMinY = 0;
+		int waveformSelectionMaxX = 0;
+		int waveformSelectionMaxY = 0;
+		const bool waveformSelectionActive = inspect
+			&& (inspectRegionActive || (inspectRegionDragging && inspectRegionMoved));
+		if (waveformSelectionActive)
+		{
+			getImageSelectionBounds(inspectRegionStart, inspectRegionEnd, planeData,
+									waveformSelectionMinX, waveformSelectionMinY,
+									waveformSelectionMaxX, waveformSelectionMaxY);
+		}
+
 		const bool waveformSourceReady = planeReady >= ImagePlaneData::LOADED;
 		if (waveformSplitView)
 		{
@@ -1352,7 +1381,47 @@ void NoPlayer::draw()
 								waveformSourceReady ? &planeData : nullptr,
 								activePlaneIdx,
 								activeMIP,
-								queueGeneration);
+								queueGeneration,
+								waveformSelectionActive,
+								waveformSelectionMinX,
+								waveformSelectionMinY,
+								waveformSelectionMaxX,
+								waveformSelectionMaxY);
+
+			const float splitterWidth = static_cast<float>(splitterWidthPx);
+			const float splitterX = static_cast<float>(analysisPanelWidth);
+			ImGui::SetNextWindowPos(ImVec2(splitterX, 0.0f), ImGuiCond_Always);
+			ImGui::SetNextWindowSize(ImVec2(splitterWidth, static_cast<float>(displayH)), ImGuiCond_Always);
+			ImGuiWindowFlags splitterFlags = ImGuiWindowFlags_NoDecoration
+										| ImGuiWindowFlags_NoBackground
+										| ImGuiWindowFlags_NoMove
+										| ImGuiWindowFlags_NoResize
+										| ImGuiWindowFlags_NoSavedSettings
+										| ImGuiWindowFlags_NoNav;
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+			ImGui::Begin("Waveform Splitter", nullptr, splitterFlags);
+			ImGui::InvisibleButton("##waveform_splitter", ImVec2(splitterWidth, static_cast<float>(displayH)));
+			const bool splitterHovered = ImGui::IsItemHovered();
+			const bool splitterActive = ImGui::IsItemActive();
+			if (splitterHovered || splitterActive)
+				ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+			if (splitterActive)
+			{
+				const float dividerMouseX = std::clamp(ImGui::GetIO().MousePos.x,
+													static_cast<float>(minDividerCenterX),
+													static_cast<float>(maxDividerCenterX));
+				waveformSplitRatio = dividerMouseX / static_cast<float>(displayW);
+			}
+			ImDrawList* splitterDrawList = ImGui::GetWindowDrawList();
+			const ImU32 splitterColor = splitterActive
+				? IM_COL32(180, 180, 180, 180)
+				: (splitterHovered ? IM_COL32(150, 150, 150, 140) : IM_COL32(100, 100, 100, 110));
+			splitterDrawList->AddLine(ImVec2(splitterWidth * 0.5f, 0.0f),
+										ImVec2(splitterWidth * 0.5f, static_cast<float>(displayH)),
+										splitterColor,
+										1.5f);
+			ImGui::End();
+			ImGui::PopStyleVar();
 		}
 
 	if (planeReady != ImagePlaneData::TEXTURE_GENERATED)
@@ -1392,8 +1461,8 @@ void NoPlayer::draw()
 			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.4f));
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
-			ImGui::SetNextWindowPos(mousePos + ImVec2((mousePos.x + 20 * unit) > displayW ? -15 * unit : 3 * unit,
-													  (mousePos.y + 20 * unit) > displayH ? -15 * unit : 4 * unit));
+				ImGui::SetNextWindowPos(mousePos + ImVec2((mousePos.x + 20 * unit) > imageViewportRight ? -15 * unit : 3 * unit,
+														  (mousePos.y + 20 * unit) > imageViewportBottom ? -15 * unit : 4 * unit));
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 										| ImGuiWindowFlags_AlwaysAutoResize;
 

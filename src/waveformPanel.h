@@ -22,7 +22,7 @@ public:
 
 	enum class PaintMode
 	{
-		White = 0,
+		LuminanceYuv = 0,
 		Rgb,
 		Red,
 		Green,
@@ -56,7 +56,12 @@ public:
 			const ImagePlaneData* planeData,
 			int planeIdx,
 			int mipIdx,
-			std::uint64_t generation);
+			std::uint64_t generation,
+			bool selectionActive,
+			int selectionMinX,
+			int selectionMinY,
+			int selectionMaxX,
+			int selectionMaxY);
 
 private:
 	struct BuildTask
@@ -66,12 +71,17 @@ private:
 		int imageHeight = 0;
 		int channelCount = 0;
 		bool isRgb = false;
+		bool selectionActive = false;
+		int selectionMinX = 0;
+		int selectionMinY = 0;
+		int selectionMaxX = 0;
+		int selectionMaxY = 0;
 		int planeIdx = -1;
 		int mipIdx = -1;
 		std::uint64_t generation = 0;
 		int plotWidth = 0;
 		int plotHeight = 0;
-		PaintMode paintMode = PaintMode::Rgb;
+		PaintMode paintMode = PaintMode::LuminanceYuv;
 		std::uint64_t serial = 0;
 	};
 
@@ -79,6 +89,11 @@ private:
 	{
 		std::vector<unsigned char> imageData;
 		bool isRgb = false;
+		bool selectionActive = false;
+		int selectionMinX = 0;
+		int selectionMinY = 0;
+		int selectionMaxX = 0;
+		int selectionMaxY = 0;
 		float minValue = 0.0f;
 		float maxValue = 1.0f;
 		float minLogValue = -8.0f;
@@ -88,7 +103,7 @@ private:
 		std::uint64_t generation = 0;
 		int plotWidth = 0;
 		int plotHeight = 0;
-		PaintMode paintMode = PaintMode::Rgb;
+		PaintMode paintMode = PaintMode::LuminanceYuv;
 		std::uint64_t serial = 0;
 	};
 
@@ -102,14 +117,24 @@ private:
 					int mipIdx,
 					std::uint64_t generation,
 					int plotWidth,
-					int plotHeight);
+					int plotHeight,
+					bool selectionActive,
+					int selectionMinX,
+					int selectionMinY,
+					int selectionMaxX,
+					int selectionMaxY);
 	void consumeReadyResult();
 	bool isValidFor(int planeIdx,
 					int mipIdx,
 					std::uint64_t generation,
 					int plotWidth,
 					int plotHeight,
-					PaintMode paintMode) const;
+					PaintMode paintMode,
+					bool selectionActive,
+					int selectionMinX,
+					int selectionMinY,
+					int selectionMaxX,
+					int selectionMaxY) const;
 
 private:
 	bool valid = false;
@@ -123,8 +148,13 @@ private:
 	float cachedMaxLogValue = 0.0f;
 	int cachedPlotWidth = 0;
 	int cachedPlotHeight = 0;
-	PaintMode currentPaintMode = PaintMode::Rgb;
-	PaintMode cachedPaintMode = PaintMode::Rgb;
+	PaintMode currentPaintMode = PaintMode::LuminanceYuv;
+	PaintMode cachedPaintMode = PaintMode::LuminanceYuv;
+	bool cachedSelectionActive = false;
+	int cachedSelectionMinX = 0;
+	int cachedSelectionMinY = 0;
+	int cachedSelectionMaxX = 0;
+	int cachedSelectionMaxY = 0;
 
 	GLuint texture = 0;
 
@@ -142,5 +172,10 @@ private:
 	std::uint64_t requestedGeneration = 0;
 	int requestedPlotWidth = 0;
 	int requestedPlotHeight = 0;
-	PaintMode requestedPaintMode = PaintMode::Rgb;
+	PaintMode requestedPaintMode = PaintMode::LuminanceYuv;
+	bool requestedSelectionActive = false;
+	int requestedSelectionMinX = 0;
+	int requestedSelectionMinY = 0;
+	int requestedSelectionMaxX = 0;
+	int requestedSelectionMaxY = 0;
 };
