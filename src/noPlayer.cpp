@@ -939,13 +939,12 @@ void NoPlayer::draw()
 
 		if(coords.x >= 0 && coords.x < planeData.imageWidth && coords.y >= 0 && coords.y < planeData.imageHeight)
 		{
-			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.4f));
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+			ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.05f, 0.05f, 0.05f, 0.5f));
+			ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 0.0f);
 
-			ImGui::SetNextWindowPos(mousePos + ImVec2((mousePos.x + 20*unit) > displayW ? -15*unit : 3*unit,
-													  (mousePos.y + 20*unit) > displayH ? -15*unit : 4*unit));
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
-										| ImGuiWindowFlags_AlwaysAutoResize;
+										| ImGuiWindowFlags_AlwaysAutoResize
+										| ImGuiWindowFlags_Tooltip;
 
 			ImGui::Begin( "Inspect", nullptr, windowFlags);
 
@@ -1019,6 +1018,8 @@ void NoPlayer::draw()
 		glBindTexture(GL_TEXTURE_2D, planeData.glTexture);
 		glBindVertexArray(VAO);
 		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+		glBindVertexArray(0);
+		glUseProgram(0);
 	}
 
 	if (!planeData.windowMatchData || channelSoloing > planeData.len)
