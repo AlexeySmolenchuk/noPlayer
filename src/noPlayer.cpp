@@ -773,6 +773,9 @@ void NoPlayer::draw()
 	{
 		const ImVec2 mousePos = ImGui::GetMousePos();
 		const bool mouseInsideImageViewport = isPointInsideImageViewport(mousePos);
+		const bool ctrlLeftPan = io.KeyCtrl
+			&& io.MouseDown[ImGuiMouseButton_Left]
+			&& isPointInsideImageViewport(io.MouseClickedPos[ImGuiMouseButton_Left]);
 		// Zoom around mouse cursor using wheel input.
 		if (io.MouseWheel!=0.0 && mouseInsideImageViewport)
 		{
@@ -814,8 +817,16 @@ void NoPlayer::draw()
 			offsetY += ImGui::GetIO().MouseDelta.y;
 		}
 
+		// Pan view with Ctrl + LMB drag.
+		if (ctrlLeftPan)
+		{
+			offsetX += ImGui::GetIO().MouseDelta.x;
+			offsetY += ImGui::GetIO().MouseDelta.y;
+		}
+
 		// Start inspector region selection on LMB click inside image.
 		if (inspect && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
+			&& !io.KeyCtrl
 			&& isPointInsideImageViewport(io.MouseClickedPos[ImGuiMouseButton_Left]))
 		{
 			const ImVec2 clickedCoords = screenToImageCoords(io.MouseClickedPos[ImGuiMouseButton_Left]);
@@ -1032,6 +1043,7 @@ void NoPlayer::draw()
 				"PgDn          Next MIP\n\n"
 				"F             Fit / 100%%\n\n"
 				"I             Inspect Tool\n\n"
+				"Ctrl+LMB      Pan View\n\n"
 				"O             OCIO Display/View picker\n\n"
 				"W             Split Waveform View\n\n"
 				"F5            Reload image\n\n"
