@@ -1010,13 +1010,7 @@ void NoPlayer::draw()
 		glUniform1i(glGetUniformLocation(shader, "nchannels"), planeData.len);
 		glUniform1i(glGetUniformLocation(shader, "doOCIO"), plane.doOCIO);
 		glUniform1i(glGetUniformLocation(shader, "checkNaN"), plane.checkNaN);
-
-		static float flash = 0;
-		flash += 1.0f/100;
-		if (flash>1.0)
-			flash = 0;
-
-		glUniform1f(glGetUniformLocation(shader, "flash"), flash);
+		glUniform1f(glGetUniformLocation(shader, "flash"), fmodf(ImGui::GetTime(), 1.0f));
 
 		glDisable(GL_BLEND);
 		glDisable(GL_DEPTH_TEST); // prevents framebuffer rectangle from being discarded
