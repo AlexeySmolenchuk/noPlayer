@@ -80,7 +80,7 @@ public:
 	 *
 	 * Called by keyboard shortcuts.
 	 *
-	 * @param idx `0` for combined view, `1..7` for channel/derived solo modes.
+	 * @param idx `0` for combined view, `1..8` for channel/derived solo modes.
 	 */
 	void setChannelSoloing(int idx) { channelSoloing = idx; }
 

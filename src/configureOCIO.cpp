@@ -276,7 +276,7 @@ void NoPlayer::configureOCIO()
 	)glsl" +
 	std::string(shaderDesc->getShaderText()) +
 	R"glsl(
-		vec3 rgbToHsl(vec3 rgb)
+		vec3 rgbToHsv(vec3 rgb)
 		{
 			float cmax = max(rgb.r, max(rgb.g, rgb.b));
 			float cmin = min(rgb.r, min(rgb.g, rgb.b));
@@ -284,15 +284,12 @@ void NoPlayer::configureOCIO()
 
 			float h = 0.0;
 			float s = 0.0;
-			float l = (cmax + cmin) * 0.5;
+			float v = cmax;
 
 			if (delta > 0.000001)
 			{
-				float denominator = 1.0 - abs(2.0 * l - 1.0);
-				if (abs(denominator) > 0.000001)
-					s = delta / denominator;
-				else
-					s = 0.0;
+				if (cmax > 0.000001)
+					s = delta / cmax;
 
 				if (cmax == rgb.r)
 					h = mod((rgb.g - rgb.b) / delta, 6.0);
@@ -306,7 +303,12 @@ void NoPlayer::configureOCIO()
 					h += 1.0;
 			}
 
-			return vec3(h, s, l);
+			return vec3(h, s, v);
+		}
+
+		float rgbToY(vec3 rgb)
+		{
+			return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
 		}
 
 		void main() {
@@ -365,23 +367,29 @@ void NoPlayer::configureOCIO()
 					break;
 				case 4:
 				{
-					vec3 hsl = rgbToHsl(rawFragment.rgb);
-					FragColor = vec4(hsl.xxx, FragColor.a);
+					vec3 hsv = rgbToHsv(rawFragment.rgb);
+					FragColor = vec4(hsv.xxx, FragColor.a);
 					break;
 				}
 				case 5:
 				{
-					vec3 hsl = rgbToHsl(rawFragment.rgb);
-					FragColor = vec4(hsl.yyy, FragColor.a);
+					vec3 hsv = rgbToHsv(rawFragment.rgb);
+					FragColor = vec4(hsv.yyy, FragColor.a);
 					break;
 				}
 				case 6:
 				{
-					vec3 hsl = rgbToHsl(rawFragment.rgb);
-					FragColor = vec4(hsl.zzz, FragColor.a);
+					vec3 hsv = rgbToHsv(rawFragment.rgb);
+					FragColor = vec4(hsv.zzz, FragColor.a);
 					break;
 				}
 				case 7:
+				{
+					float y = rgbToY(rawFragment.rgb);
+					FragColor = vec4(vec3(y), FragColor.a);
+					break;
+				}
+				case 8:
 					FragColor = FragColor.aaaa;
 					break;
 				}

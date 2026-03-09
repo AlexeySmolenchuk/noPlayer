@@ -9,7 +9,7 @@
 - View subimages / AOVs and switch between them.
 - View MIP levels and switch between them.
 - Zoom, pan, fit, and inspect images interactively.
-- Solo channels as `RGB`, `R`, `G`, `B`, `H`, `S`, `L`, or `A`.
+- Solo channels as `RGB`, `R`, `G`, `B`, `H`, `S`, `V`, `Y`, or `A`.
 - Adjust gain and offset, or auto-fit the current visible range.
 - Toggle OCIO display/view transforms.
 - Toggle NaN highlighting.
@@ -120,8 +120,9 @@ These controls apply to the image view.
 | `3` | Solo `B` |
 | `4` | Solo `H` |
 | `5` | Solo `S` |
-| `6` | Solo `L` |
-| `7` | Solo `A` |
+| `6` | Solo `V` |
+| `7` | Solo `Y` |
+| `8` | Solo `A` |
 | `0` | Reset gain and offset |
 | `-` | Decrease gain by one stop |
 | `=` | Increase gain by one stop |
@@ -134,7 +135,7 @@ These controls apply to the image view.
 
 Notes:
 
-- `H`, `S`, and `L` solo modes only make sense on RGB planes.
+- `H`, `S`, `V`, and `Y` solo modes only make sense on RGB planes.
 - `A` solo only works when the current plane has an alpha channel.
 - `R` auto-fit uses the currently active solo mode when possible.
 
@@ -146,7 +147,7 @@ What inspect mode gives you:
 
 - pixel coordinates
 - per-channel values under the mouse
-- `H`, `S`, `L` readout for RGB planes
+- raw `H`, `S`, `V`, `Y` readout for RGB planes
 - average values over a dragged region
 
 When an inspect region is active:

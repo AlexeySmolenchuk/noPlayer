@@ -15,8 +15,9 @@ constexpr int SOLO_G = 2;
 constexpr int SOLO_B = 3;
 constexpr int SOLO_H = 4;
 constexpr int SOLO_S = 5;
-constexpr int SOLO_L = 6;
-constexpr int SOLO_A = 7;
+constexpr int SOLO_V = 6;
+constexpr int SOLO_Y = 7;
+constexpr int SOLO_A = 8;
 constexpr float WAVEFORM_LOG_EPSILON = 1e-6f;
 
 int clampMipIndexForPlane(const ImagePlane& plane, int mipIndex)
@@ -59,9 +60,11 @@ bool isRgbChannels(const std::string& channels)
 		&& isChannel(channels[2], 'b');
 }
 
-bool isHslSolo(int mode)
+float computeWaveformYuvLuma(float red, float green, float blue);
+
+bool isDerivedSolo(int mode)
 {
-	return mode >= SOLO_H && mode <= SOLO_L;
+	return mode >= SOLO_H && mode <= SOLO_Y;
 }
 
 bool canRenderSoloMode(int mode, const ImagePlaneData& plane)
@@ -73,7 +76,7 @@ bool canRenderSoloMode(int mode, const ImagePlaneData& plane)
 	if (mode >= SOLO_R && mode <= SOLO_B)
 		return mode <= plane.len;
 
-	if (isHslSolo(mode) && plane.len >= 3 && isRgbChannels(plane.channels))
+	if (isDerivedSolo(mode) && plane.len >= 3 && isRgbChannels(plane.channels))
 		return true;
 
 	if (mode == SOLO_A && plane.len >= 4)
@@ -82,9 +85,9 @@ bool canRenderSoloMode(int mode, const ImagePlaneData& plane)
 	return false;
 }
 
-void rgbToHsl(float r, float g, float b, float& h, float& s, float& l)
+void rgbToHsvy(float r, float g, float b, float& h, float& s, float& v, float& y)
 {
-	// Convert raw RGB values to normalized hue plus unconstrained S/L.
+	// Convert raw RGB values to HDR-stable HSV plus BT.709 luminance.
 	auto sanitize = [](float value)
 	{
 		if (!std::isfinite(value))
@@ -100,20 +103,16 @@ void rgbToHsl(float r, float g, float b, float& h, float& s, float& l)
 	const float cmin = std::min({r, g, b});
 	const float delta = cmax - cmin;
 
-	l = (cmax + cmin) * 0.5f;
+	v = cmax;
+	y = computeWaveformYuvLuma(r, g, b);
+	h = 0.0f;
+	s = 0.0f;
 
 	if (delta <= std::numeric_limits<float>::epsilon())
-	{
-		h = 0.0f;
-		s = 0.0f;
 		return;
-	}
 
-	const float denominator = 1.0f - std::fabs(2.0f * l - 1.0f);
-	if (std::fabs(denominator) <= std::numeric_limits<float>::epsilon())
-		s = 0.0f;
-	else
-		s = delta / denominator;
+	if (cmax > std::numeric_limits<float>::epsilon())
+		s = delta / cmax;
 
 	if (cmax == r)
 		h = std::fmod((g - b) / delta, 6.0f);
@@ -127,6 +126,29 @@ void rgbToHsl(float r, float g, float b, float& h, float& s, float& l)
 		h += 1.0f;
 	while (h >= 1.0f)
 		h -= 1.0f;
+}
+
+bool computeDerivedSoloValue(int mode, float r, float g, float b, float& value)
+{
+	float h, s, v, y;
+	rgbToHsvy(r, g, b, h, s, v, y);
+	switch (mode)
+	{
+	case SOLO_H:
+		value = h;
+		return true;
+	case SOLO_S:
+		value = s;
+		return true;
+	case SOLO_V:
+		value = v;
+		return true;
+	case SOLO_Y:
+		value = y;
+		return true;
+	default:
+		return false;
+	}
 }
 
 bool isPointInsideImage(const ImVec2& coords, const ImagePlaneData& planeData)
@@ -1018,6 +1040,28 @@ void NoPlayer::draw()
 					min_value = pixel_min[channelSoloing-1];
 					max_value = pixel_max[channelSoloing-1];
 				}
+				else if (isDerivedSolo(channelSoloing) && planeData.len >= 3 && isRgbChannels(plane.channels) && planeData.pixels)
+				{
+					const precision* pixels = planeData.pixels.get();
+					for (unsigned int y = 0; y < planeData.imageHeight; y++)
+					{
+						for (unsigned int x = 0; x < planeData.imageWidth; x++)
+						{
+							const size_t pixelOffset = (static_cast<size_t>(y) * static_cast<size_t>(planeData.imageWidth)
+													 + static_cast<size_t>(x)) * static_cast<size_t>(planeData.len);
+							float value = 0.0f;
+							if (computeDerivedSoloValue(channelSoloing,
+														static_cast<float>(pixels[pixelOffset + 0]),
+														static_cast<float>(pixels[pixelOffset + 1]),
+														static_cast<float>(pixels[pixelOffset + 2]),
+														value))
+							{
+								min_value = std::min(min_value, value);
+								max_value = std::max(max_value, value);
+							}
+						}
+					}
+				}
 				else if (channelSoloing == SOLO_A && planeData.len >= 4)
 				{
 					min_value = pixel_min[3];
@@ -1072,9 +1116,12 @@ void NoPlayer::draw()
 			setChannelSoloing(SOLO_S);
 
 		if (ImGui::IsKeyPressed(ImGuiKey_6))
-			setChannelSoloing(SOLO_L);
+			setChannelSoloing(SOLO_V);
 
 		if (ImGui::IsKeyPressed(ImGuiKey_7))
+			setChannelSoloing(SOLO_Y);
+
+		if (ImGui::IsKeyPressed(ImGuiKey_8))
 			setChannelSoloing(SOLO_A);
 	}
 
@@ -1084,7 +1131,7 @@ void NoPlayer::draw()
 
 				static const char* helpMsg = 
 					"              Shortcuts:\n\n"
-					"` 1 2 3 4 5 6 7 (top row) RGB / R / G / B / H / S / L / A\n\n"
+					"` 1 2 3 4 5 6 7 8 (top row) RGB / R / G / B / H / S / V / Y / A\n\n"
 				"0 - =         (top row) Exposure Reset / EV- / EV+\n\n"
 				"R             Adjust Gain and Offset to fit Range\n\n"
 				"[             Previous AOV\n\n"
@@ -1254,14 +1301,14 @@ void NoPlayer::draw()
 				{
 					ImGui::Text(plane.channels.c_str());
 				}
-				else if (isHslSolo(channelSoloing) && planeData.len >= 3 && isRgbChannels(plane.channels))
+				else if (isDerivedSolo(channelSoloing) && planeData.len >= 3 && isRgbChannels(plane.channels))
 				{
-					const char* hsl = "HSL";
-					for (int i = 0; i < 3; i++)
+					const char* derived = "HSVY";
+					for (int i = 0; i < 4; i++)
 					{
 						if (i) ImGui::SameLine(0, 0);
 						ImGui::TextColored(((SOLO_H + i) == channelSoloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1),
-										"%c", hsl[i]);
+										"%c", derived[i]);
 					}
 				}
 				else
@@ -1655,11 +1702,13 @@ void NoPlayer::draw()
 				{
 					if (inspectedChannels >= 3 && isRgbChannels(planeData.channels))
 					{
-						float hue, saturation, lightness;
-						rgbToHsl(channelValues[0], channelValues[1], channelValues[2], hue, saturation, lightness);
-						ImGui::Text("R: %.4f  H:%.4f", channelValues[0], hue);
+						float hue, saturation, value, luminance;
+						rgbToHsvy(channelValues[0], channelValues[1], channelValues[2], hue, saturation, value, luminance);
+						const float hueDegrees = (saturation <= std::numeric_limits<float>::epsilon()) ? 0.0f : (hue * 360.0f);
+						ImGui::Text("R: %.4f  H:%.2f", channelValues[0], hueDegrees);
 						ImGui::Text("G: %.4f  S:%.4f", channelValues[1], saturation);
-						ImGui::Text("B: %.4f  L:%.4f", channelValues[2], lightness);
+						ImGui::Text("B: %.4f  V:%.4f", channelValues[2], value);
+						ImGui::Text("Y: %.4f", luminance);
 
 						for (int i = 3; i < inspectedChannels; i++)
 							ImGui::Text("%s: %.4f", planeData.channels.substr(i, 1).c_str(), channelValues[i]);
