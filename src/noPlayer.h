@@ -306,6 +306,8 @@ private:
 	bool waveformSplitView = false;
 	/** Width fraction used by the split waveform pane when enabled. */
 	float waveformSplitRatio = 0.5f;
+	/** Tracks an active splitter drag so waveform rebuilds can be deferred until release. */
+	bool waveformSplitterDragging = false;
 	/** Helper owning waveform cache and drawing for split analysis mode. */
 	WaveformPanel waveformPanel;
 

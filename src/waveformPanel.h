@@ -51,7 +51,7 @@ public:
 	};
 
 	/**
-	 * @brief Release cached waveform content and GPU resources.
+	 * @brief Release cached waveform content.
 	 */
 	void invalidate();
 
@@ -73,6 +73,7 @@ public:
 	void draw(int panelWidth,
 			int panelHeight,
 			float unit,
+			bool deferSizeRebuild,
 			bool sourceReady,
 			const ImagePlaneData* planeData,
 			int planeIdx,
@@ -88,6 +89,41 @@ public:
 	const HoverInfo& getHoverInfo() const { return hoverInfo; }
 
 private:
+	struct WaveformRequestKey
+	{
+		int planeIdx = -1;
+		int mipIdx = -1;
+		std::uint64_t generation = 0;
+		int plotWidth = 0;
+		int plotHeight = 0;
+		PaintMode paintMode = PaintMode::LuminanceYuv;
+		bool selectionActive = false;
+		int selectionMinX = 0;
+		int selectionMinY = 0;
+		int selectionMaxX = 0;
+		int selectionMaxY = 0;
+
+		bool operator==(const WaveformRequestKey& other) const
+		{
+			return planeIdx == other.planeIdx
+				&& mipIdx == other.mipIdx
+				&& generation == other.generation
+				&& plotWidth == other.plotWidth
+				&& plotHeight == other.plotHeight
+				&& paintMode == other.paintMode
+				&& selectionActive == other.selectionActive
+				&& selectionMinX == other.selectionMinX
+				&& selectionMinY == other.selectionMinY
+				&& selectionMaxX == other.selectionMaxX
+				&& selectionMaxY == other.selectionMaxY;
+		}
+
+		bool operator!=(const WaveformRequestKey& other) const
+		{
+			return !(*this == other);
+		}
+	};
+
 	struct BuildTask
 	{
 		std::shared_ptr<precision[]> pixels;
@@ -95,17 +131,7 @@ private:
 		int imageHeight = 0;
 		int channelCount = 0;
 		bool isRgb = false;
-		bool selectionActive = false;
-		int selectionMinX = 0;
-		int selectionMinY = 0;
-		int selectionMaxX = 0;
-		int selectionMaxY = 0;
-		int planeIdx = -1;
-		int mipIdx = -1;
-		std::uint64_t generation = 0;
-		int plotWidth = 0;
-		int plotHeight = 0;
-		PaintMode paintMode = PaintMode::LuminanceYuv;
+		WaveformRequestKey key;
 		std::uint64_t serial = 0;
 	};
 
@@ -113,21 +139,11 @@ private:
 	{
 		std::vector<unsigned char> imageData;
 		bool isRgb = false;
-		bool selectionActive = false;
-		int selectionMinX = 0;
-		int selectionMinY = 0;
-		int selectionMaxX = 0;
-		int selectionMaxY = 0;
 		float minValue = 0.0f;
 		float maxValue = 1.0f;
 		float minLogValue = -8.0f;
 		float maxLogValue = 0.0f;
-		int planeIdx = -1;
-		int mipIdx = -1;
-		std::uint64_t generation = 0;
-		int plotWidth = 0;
-		int plotHeight = 0;
-		PaintMode paintMode = PaintMode::LuminanceYuv;
+		WaveformRequestKey key;
 		std::uint64_t serial = 0;
 	};
 
@@ -149,49 +165,32 @@ private:
 	static BuildResult buildWaveform(const BuildTask& task, ScratchBuffers& scratch);
 
 	void workerLoop();
-	void requestBuild(const ImagePlaneData& planeData,
-					int planeIdx,
-					int mipIdx,
-					std::uint64_t generation,
-					int plotWidth,
-					int plotHeight,
-					bool selectionActive,
-					int selectionMinX,
-					int selectionMinY,
-					int selectionMaxX,
-					int selectionMaxY);
+	WaveformRequestKey makeRequestKey(int planeIdx,
+									int mipIdx,
+									std::uint64_t generation,
+									int plotWidth,
+									int plotHeight,
+									bool selectionActive,
+									int selectionMinX,
+									int selectionMinY,
+									int selectionMaxX,
+									int selectionMaxY) const;
+	void requestBuild(const ImagePlaneData& planeData, const WaveformRequestKey& key);
 	void consumeReadyResult();
-	bool isValidFor(int planeIdx,
-					int mipIdx,
-					std::uint64_t generation,
-					int plotWidth,
-					int plotHeight,
-					PaintMode paintMode,
-					bool selectionActive,
-					int selectionMinX,
-					int selectionMinY,
-					int selectionMaxX,
-					int selectionMaxY) const;
+	bool isValidFor(const WaveformRequestKey& key) const;
+	static bool matchesContentIgnoringPlotSize(const WaveformRequestKey& left,
+												 const WaveformRequestKey& right);
+	void resetCachedState();
 
 private:
 	bool valid = false;
-	int cachedPlaneIdx = -1;
-	int cachedMipIdx = -1;
-	std::uint64_t cachedGeneration = 0;
+	WaveformRequestKey cachedKey;
 	bool cachedIsRgb = false;
 	float cachedMinValue = 0.0f;
 	float cachedMaxValue = 1.0f;
 	float cachedMinLogValue = -8.0f;
 	float cachedMaxLogValue = 0.0f;
-	int cachedPlotWidth = 0;
-	int cachedPlotHeight = 0;
 	PaintMode currentPaintMode = PaintMode::LuminanceYuv;
-	PaintMode cachedPaintMode = PaintMode::LuminanceYuv;
-	bool cachedSelectionActive = false;
-	int cachedSelectionMinX = 0;
-	int cachedSelectionMinY = 0;
-	int cachedSelectionMaxX = 0;
-	int cachedSelectionMaxY = 0;
 	HoverInfo hoverInfo;
 
 	GLuint texture = 0;
@@ -208,15 +207,5 @@ private:
 	BuildTask pendingTask;
 	BuildResult readyResult;
 	std::uint64_t latestRequestedSerial = 0;
-	int requestedPlaneIdx = -1;
-	int requestedMipIdx = -1;
-	std::uint64_t requestedGeneration = 0;
-	int requestedPlotWidth = 0;
-	int requestedPlotHeight = 0;
-	PaintMode requestedPaintMode = PaintMode::LuminanceYuv;
-	bool requestedSelectionActive = false;
-	int requestedSelectionMinX = 0;
-	int requestedSelectionMinY = 0;
-	int requestedSelectionMaxX = 0;
-	int requestedSelectionMaxY = 0;
+	WaveformRequestKey requestedKey;
 };

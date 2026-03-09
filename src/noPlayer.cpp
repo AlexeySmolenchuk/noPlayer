@@ -22,6 +22,7 @@ constexpr int SOLO_V = 6;
 constexpr int SOLO_Y = 7;
 constexpr int SOLO_A = 8;
 constexpr float WAVEFORM_LOG_EPSILON = 1e-6f;
+constexpr size_t MAX_TEXTURE_UPLOADS_PER_FRAME = 4;
 
 int clampMipIndexForPlane(const ImagePlane& plane, int mipIndex)
 {
@@ -235,10 +236,11 @@ void dropCallback(GLFWwindow* window, int count, const char** paths)
 
 void framebufferSizeCallback(GLFWwindow* window, int width, int height)
 {
-	// Trigger redraw when framebuffer size changes.
+	(void)width;
+	(void)height;
+	// Refresh UI scale after framebuffer changes; the main loop owns rendering.
 	NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(window));
 	view->updateFontScale();
-	view->draw();
 }
 
 
@@ -293,42 +295,42 @@ GLFWmonitor* getCurrentMonitor(GLFWwindow *window)
 
 void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int mods)
 {
+	(void)scancode;
+	(void)mods;
+
 	// Toggle fullscreen on F11.
 	if (key == GLFW_KEY_F11 && action == GLFW_PRESS)
 	{
-		if ( glfwGetKey( mainWindow, GLFW_KEY_F11 ) == GLFW_PRESS )
+		static bool fullScreen = false;
+		static int x,y,w,h;
+		if (fullScreen)
 		{
-			static bool fullScreen = false;
-			static int x,y,w,h;
-			if (fullScreen)
-			{
-				glfwSetWindowPos(mainWindow, x, y);
-				glfwSetWindowSize(mainWindow, w, h);
-				fullScreen = false;
-			}
-				else
-				{
-					glfwGetWindowPos(mainWindow, &x, &y);
-					glfwGetWindowSize(mainWindow, &w, &h);
-					GLFWmonitor *monitor = getCurrentMonitor(mainWindow);
-					if (!monitor)
-						return;
-
-					int _x, _y ,_w ,_h;
-					glfwGetMonitorWorkarea(monitor, &_x, &_y, &_w, &_h);
-					glfwSetWindowPos(mainWindow, _x, _y);
-
-					const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-					if (!mode)
-						return;
-					glfwSetWindowSize(mainWindow, mode->width, mode->height);
-					fullScreen = true;
-				}
-			glfwSwapBuffers(mainWindow);
+			glfwSetWindowPos(mainWindow, x, y);
+			glfwSetWindowSize(mainWindow, w, h);
+			fullScreen = false;
 		}
+		else
+		{
+			glfwGetWindowPos(mainWindow, &x, &y);
+			glfwGetWindowSize(mainWindow, &w, &h);
+			GLFWmonitor *monitor = getCurrentMonitor(mainWindow);
+			if (!monitor)
+				return;
+
+			int _x, _y ,_w ,_h;
+			glfwGetMonitorWorkarea(monitor, &_x, &_y, &_w, &_h);
+			glfwSetWindowPos(mainWindow, _x, _y);
+
+			const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+			if (!mode)
+				return;
+			glfwSetWindowSize(mainWindow, mode->width, mode->height);
+			fullScreen = true;
+		}
+		glfwSwapBuffers(mainWindow);
 	}
 
-	if ( glfwGetKey( mainWindow, GLFW_KEY_F5 ) == GLFW_PRESS )
+	if (key == GLFW_KEY_F5 && action == GLFW_PRESS)
 	{
 		// Reload current file while preserving per-plane state where possible.
 		NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(mainWindow));
@@ -340,7 +342,7 @@ void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int 
 		}
 	}
 
-	if ( glfwGetKey( mainWindow, GLFW_KEY_ESCAPE ) == GLFW_PRESS )
+	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
 		glfwSetWindowShouldClose(mainWindow, GL_TRUE);
 }
 
@@ -411,6 +413,8 @@ NoPlayer::NoPlayer()
 
 	// Configure shared OIIO cache used by async loaders.
 	using namespace OIIO;
+	float missing[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+	OIIO::attribute("missingcolor", TypeDesc("float[4]"), &missing);
 	cache = ImageCache::create ();
 	cache->attribute ("max_memory_MB", 8000.0f);
 	cache->attribute ("autotile", 64);
@@ -454,16 +458,16 @@ NoPlayer::init(const char* fileName, bool fresh)
 	}
 	waveformPanel.invalidate();
 
+	if (imagePlanes.empty())
+		return;
+
+	activePlaneIdx = std::clamp(activePlaneIdx, 0, static_cast<int>(imagePlanes.size()) - 1);
+	activeMIP = clampMipIndexForPlane(imagePlanes[activePlaneIdx], activeMIP);
+
 	std::unique_lock<std::mutex> lock(mtx);
 	loadingQueue.clear();
-	// Queue all mips so first draw can progressively resolve textures.
-	for(auto ip = imagePlanes.rbegin(); ip != imagePlanes.rend(); ++ip)
-	{
-		for(auto mip = ip->MIPs.rbegin(); mip != ip->MIPs.rend(); ++mip)
-		{
-			enqueueLoadLocked(&(*mip));
-		}
-	}
+	// Queue only the active view first; adjacent planes/mips are scheduled on demand in run().
+	enqueueLoadLocked(&imagePlanes[activePlaneIdx].MIPs[activeMIP]);
 }
 
 
@@ -577,12 +581,6 @@ void NoPlayer::enqueueLoadLocked(ImagePlaneData* plane)
 	if (plane->ready != ImagePlaneData::NOT_ISSUED)
 		return;
 
-	for (const LoadTask &task : loadingQueue)
-	{
-		if (task.generation == queueGeneration && task.plane == plane)
-			return;
-	}
-
 	loadingQueue.push_back({plane, queueGeneration});
 	// Mark as issued and wake worker.
 	plane->ready = ImagePlaneData::ISSUED;
@@ -687,17 +685,21 @@ void NoPlayer::run()
 			}
 
 
-			LoadTask finishedTask;
+			for (size_t uploadCount = 0; uploadCount < MAX_TEXTURE_UPLOADS_PER_FRAME; uploadCount++)
 			{
-				std::lock_guard<std::mutex> lock(mtx);
-				if (!textureQueue.empty())
+				LoadTask finishedTask;
 				{
+					std::lock_guard<std::mutex> lock(mtx);
+					if (textureQueue.empty())
+						break;
+
 					finishedTask = textureQueue.front();
 					textureQueue.pop();
 				}
-			}
-			if (finishedTask.plane)
-			{
+
+				if (finishedTask.plane == nullptr)
+					continue;
+
 				bool generated = finishedTask.plane->generateGlTexture();
 				std::lock_guard<std::mutex> lock(mtx);
 				if (finishedTask.generation == queueGeneration)
@@ -980,15 +982,16 @@ void NoPlayer::draw()
 				scale = 1.0f/compensateMIP;
 		}
 
-		if (ImGui::IsKeyPressed(ImGuiKey_H))
-			ui = !ui;
-		if (ImGui::IsKeyPressed(ImGuiKey_O))
-			ocioPickerVisible = !ocioPickerVisible;
-		if (ImGui::IsKeyPressed(ImGuiKey_W))
-		{
-			waveformSplitView = !waveformSplitView;
-			waveformPanel.invalidate();
-		}
+			if (ImGui::IsKeyPressed(ImGuiKey_H))
+				ui = !ui;
+			if (ImGui::IsKeyPressed(ImGuiKey_O))
+				ocioPickerVisible = !ocioPickerVisible;
+			if (ImGui::IsKeyPressed(ImGuiKey_W))
+			{
+				waveformSplitView = !waveformSplitView;
+				waveformSplitterDragging = false;
+				waveformPanel.invalidate();
+			}
 
 		if (ImGui::IsKeyPressed(ImGuiKey_0))
 		{
@@ -1524,6 +1527,7 @@ void NoPlayer::draw()
 			waveformPanel.draw(analysisPanelWidth,
 								displayH,
 								unit,
+								waveformSplitterDragging,
 								waveformSourceReady,
 								waveformSourceReady ? &planeData : nullptr,
 								activePlaneIdx,
@@ -1539,38 +1543,43 @@ void NoPlayer::draw()
 			const float splitterWidth = static_cast<float>(splitterWidthPx);
 			const float splitterX = static_cast<float>(analysisPanelWidth);
 			ImGui::SetNextWindowPos(ImVec2(splitterX, 0.0f), ImGuiCond_Always);
-			ImGui::SetNextWindowSize(ImVec2(splitterWidth, static_cast<float>(displayH)), ImGuiCond_Always);
-			ImGuiWindowFlags splitterFlags = ImGuiWindowFlags_NoDecoration
-										| ImGuiWindowFlags_NoBackground
-										| ImGuiWindowFlags_NoMove
-										| ImGuiWindowFlags_NoResize
-										| ImGuiWindowFlags_NoSavedSettings
-										| ImGuiWindowFlags_NoNav;
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-			ImGui::Begin("Waveform Splitter", nullptr, splitterFlags);
-			ImGui::InvisibleButton("##waveform_splitter", ImVec2(splitterWidth, static_cast<float>(displayH)));
-			const bool splitterHovered = ImGui::IsItemHovered();
-			const bool splitterActive = ImGui::IsItemActive();
-			if (splitterHovered || splitterActive)
-				ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-			if (splitterActive)
-			{
-				const float dividerMouseX = std::clamp(ImGui::GetIO().MousePos.x,
+				ImGui::SetNextWindowSize(ImVec2(splitterWidth, static_cast<float>(displayH)), ImGuiCond_Always);
+				ImGuiWindowFlags splitterFlags = ImGuiWindowFlags_NoDecoration
+											| ImGuiWindowFlags_NoBackground
+											| ImGuiWindowFlags_NoMove
+											| ImGuiWindowFlags_NoResize
+											| ImGuiWindowFlags_NoSavedSettings
+											| ImGuiWindowFlags_NoNav;
+				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+				ImGui::Begin("Waveform Splitter", nullptr, splitterFlags);
+				ImGui::InvisibleButton("##waveform_splitter", ImVec2(splitterWidth, static_cast<float>(displayH)));
+				const bool splitterHovered = ImGui::IsItemHovered();
+				const bool splitterActive = ImGui::IsItemActive();
+				waveformSplitterDragging = splitterActive;
+				if (splitterHovered || splitterActive)
+					ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+				if (splitterActive)
+				{
+					const float dividerMouseX = std::clamp(ImGui::GetIO().MousePos.x,
 													static_cast<float>(minDividerCenterX),
 													static_cast<float>(maxDividerCenterX));
-				waveformSplitRatio = dividerMouseX / static_cast<float>(displayW);
+					waveformSplitRatio = dividerMouseX / static_cast<float>(displayW);
+				}
+				ImDrawList* splitterDrawList = ImGui::GetWindowDrawList();
+				const ImU32 splitterColor = splitterActive
+					? IM_COL32(180, 180, 180, 180)
+					: (splitterHovered ? IM_COL32(150, 150, 150, 140) : IM_COL32(100, 100, 100, 110));
+				splitterDrawList->AddLine(ImVec2(splitterWidth * 0.5f, 0.0f),
+											ImVec2(splitterWidth * 0.5f, static_cast<float>(displayH)),
+											splitterColor,
+											1.5f);
+				ImGui::End();
+				ImGui::PopStyleVar();
 			}
-			ImDrawList* splitterDrawList = ImGui::GetWindowDrawList();
-			const ImU32 splitterColor = splitterActive
-				? IM_COL32(180, 180, 180, 180)
-				: (splitterHovered ? IM_COL32(150, 150, 150, 140) : IM_COL32(100, 100, 100, 110));
-			splitterDrawList->AddLine(ImVec2(splitterWidth * 0.5f, 0.0f),
-										ImVec2(splitterWidth * 0.5f, static_cast<float>(displayH)),
-										splitterColor,
-										1.5f);
-			ImGui::End();
-			ImGui::PopStyleVar();
-		}
+			else
+			{
+				waveformSplitterDragging = false;
+			}
 
 	if (planeReady != ImagePlaneData::TEXTURE_GENERATED)
 	{

@@ -20,14 +20,6 @@ float toLogValue(float value, float minLogValue)
 	return ImageChannelUtils::toLog2OrFloor(value, minLogValue, EPSILON);
 }
 
-float computeIntensity(std::uint32_t count, std::uint32_t maxCount)
-{
-	if (count == 0 || maxCount == 0)
-		return 0.0f;
-	const float normalized = std::log1p(static_cast<float>(count)) / std::log1p(static_cast<float>(maxCount));
-	return std::sqrt(std::clamp(normalized, 0.0f, 1.0f));
-}
-
 bool isSingleChannelMode(WaveformPanel::PaintMode mode)
 {
 	return mode == WaveformPanel::PaintMode::Red
@@ -94,8 +86,19 @@ void buildIntensityMap(const std::vector<std::uint32_t>& histogram,
 	const size_t histogramSize = static_cast<size_t>(width) * static_cast<size_t>(height);
 	resizeAndFill(base, histogramSize, 0.0f);
 	resizeAndFill(spread, histogramSize, 0.0f);
-	for (size_t index = 0; index < histogramSize; index++)
-		base[index] = computeIntensity(histogram[index], maxCount);
+	if (maxCount != 0)
+	{
+		const float logMaxCount = std::log1p(static_cast<float>(maxCount));
+		for (size_t index = 0; index < histogramSize; index++)
+		{
+			const std::uint32_t count = histogram[index];
+			if (count == 0)
+				continue;
+
+			const float normalized = std::log1p(static_cast<float>(count)) / logMaxCount;
+			base[index] = std::sqrt(std::clamp(normalized, 0.0f, 1.0f));
+		}
+	}
 
 	for (int y = 0; y < height; y++)
 	{
@@ -129,14 +132,14 @@ void buildIntensityMap(const std::vector<std::uint32_t>& histogram,
 
 }
 
-void accumulateTexturePixel(std::vector<unsigned char>& imageData,
-							int width,
-							int x,
-							int y,
-							float red,
-							float green,
-							float blue,
-							float alpha)
+void setTexturePixel(std::vector<unsigned char>& imageData,
+					 int width,
+					 int x,
+					 int y,
+					 float red,
+					 float green,
+					 float blue,
+					 float alpha)
 {
 	const size_t pixelOffset = (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 4ull;
 	const auto clampToByte = [](float value)
@@ -145,10 +148,10 @@ void accumulateTexturePixel(std::vector<unsigned char>& imageData,
 		return static_cast<unsigned char>(std::clamp(scaled, 0, 255));
 	};
 
-	imageData[pixelOffset + 0] = std::max(imageData[pixelOffset + 0], clampToByte(red));
-	imageData[pixelOffset + 1] = std::max(imageData[pixelOffset + 1], clampToByte(green));
-	imageData[pixelOffset + 2] = std::max(imageData[pixelOffset + 2], clampToByte(blue));
-	imageData[pixelOffset + 3] = std::max(imageData[pixelOffset + 3], clampToByte(alpha));
+	imageData[pixelOffset + 0] = clampToByte(red);
+	imageData[pixelOffset + 1] = clampToByte(green);
+	imageData[pixelOffset + 2] = clampToByte(blue);
+	imageData[pixelOffset + 3] = clampToByte(alpha);
 }
 }
 
@@ -165,6 +168,19 @@ WaveformPanel::~WaveformPanel()
 }
 
 
+void WaveformPanel::resetCachedState()
+{
+	valid = false;
+	cachedKey = WaveformRequestKey();
+	cachedIsRgb = false;
+	cachedMinValue = 0.0f;
+	cachedMaxValue = 1.0f;
+	cachedMinLogValue = DEFAULT_LOG_FLOOR;
+	cachedMaxLogValue = 0.0f;
+	hoverInfo = HoverInfo();
+}
+
+
 void WaveformPanel::invalidate()
 {
 	{
@@ -172,38 +188,10 @@ void WaveformPanel::invalidate()
 		latestRequestedSerial++;
 		hasPendingTask = false;
 		hasReadyResult = false;
-		requestedPlaneIdx = -1;
-		requestedMipIdx = -1;
-		requestedGeneration = 0;
-		requestedPlotWidth = 0;
-		requestedPlotHeight = 0;
-		requestedPaintMode = currentPaintMode;
-		requestedSelectionActive = false;
-		requestedSelectionMinX = 0;
-		requestedSelectionMinY = 0;
-		requestedSelectionMaxX = 0;
-		requestedSelectionMaxY = 0;
+		requestedKey = WaveformRequestKey();
 	}
 
-	valid = false;
-	cachedPlaneIdx = -1;
-	cachedMipIdx = -1;
-	cachedGeneration = 0;
-	cachedIsRgb = false;
-	cachedMinValue = 0.0f;
-	cachedMaxValue = 1.0f;
-	cachedMinLogValue = DEFAULT_LOG_FLOOR;
-	cachedMaxLogValue = 0.0f;
-	cachedPlotWidth = 0;
-	cachedPlotHeight = 0;
-	cachedPaintMode = currentPaintMode;
-	cachedSelectionActive = false;
-	cachedSelectionMinX = 0;
-	cachedSelectionMinY = 0;
-	cachedSelectionMaxX = 0;
-	cachedSelectionMaxY = 0;
-	hoverInfo = HoverInfo();
-	releaseGlResources();
+	resetCachedState();
 }
 
 
@@ -236,30 +224,51 @@ void WaveformPanel::shutdownWorker()
 }
 
 
-bool WaveformPanel::isValidFor(int planeIdx,
-							   int mipIdx,
-							   std::uint64_t generation,
-							   int plotWidth,
-							   int plotHeight,
-							   PaintMode paintMode,
-							   bool selectionActive,
-							   int selectionMinX,
-							   int selectionMinY,
-							   int selectionMaxX,
-							   int selectionMaxY) const
+WaveformPanel::WaveformRequestKey WaveformPanel::makeRequestKey(int planeIdx,
+																int mipIdx,
+																std::uint64_t generation,
+																int plotWidth,
+																int plotHeight,
+																bool selectionActive,
+																int selectionMinX,
+																int selectionMinY,
+																int selectionMaxX,
+																int selectionMaxY) const
 {
-	return valid
-		&& cachedPlaneIdx == planeIdx
-		&& cachedMipIdx == mipIdx
-		&& cachedGeneration == generation
-		&& cachedPlotWidth == plotWidth
-		&& cachedPlotHeight == plotHeight
-		&& cachedPaintMode == paintMode
-		&& cachedSelectionActive == selectionActive
-		&& cachedSelectionMinX == selectionMinX
-		&& cachedSelectionMinY == selectionMinY
-		&& cachedSelectionMaxX == selectionMaxX
-		&& cachedSelectionMaxY == selectionMaxY;
+	WaveformRequestKey key;
+	key.planeIdx = planeIdx;
+	key.mipIdx = mipIdx;
+	key.generation = generation;
+	key.plotWidth = plotWidth;
+	key.plotHeight = plotHeight;
+	key.paintMode = currentPaintMode;
+	key.selectionActive = selectionActive;
+	key.selectionMinX = selectionMinX;
+	key.selectionMinY = selectionMinY;
+	key.selectionMaxX = selectionMaxX;
+	key.selectionMaxY = selectionMaxY;
+	return key;
+}
+
+
+bool WaveformPanel::isValidFor(const WaveformRequestKey& key) const
+{
+	return valid && cachedKey == key;
+}
+
+
+bool WaveformPanel::matchesContentIgnoringPlotSize(const WaveformRequestKey& left,
+												   const WaveformRequestKey& right)
+{
+	return left.planeIdx == right.planeIdx
+		&& left.mipIdx == right.mipIdx
+		&& left.generation == right.generation
+		&& left.paintMode == right.paintMode
+		&& left.selectionActive == right.selectionActive
+		&& left.selectionMinX == right.selectionMinX
+		&& left.selectionMinY == right.selectionMinY
+		&& left.selectionMaxX == right.selectionMaxX
+		&& left.selectionMaxY == right.selectionMaxY;
 }
 
 
@@ -267,32 +276,24 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task, S
 {
 	BuildResult result;
 	result.isRgb = task.isRgb;
-	result.planeIdx = task.planeIdx;
-	result.mipIdx = task.mipIdx;
-	result.generation = task.generation;
-	result.plotWidth = std::max(1, task.plotWidth);
-	result.plotHeight = std::max(1, task.plotHeight);
-	result.paintMode = task.paintMode;
+	result.key = task.key;
+	result.key.plotWidth = std::max(1, result.key.plotWidth);
+	result.key.plotHeight = std::max(1, result.key.plotHeight);
 	result.serial = task.serial;
-	result.selectionActive = task.selectionActive;
-	result.selectionMinX = task.selectionMinX;
-	result.selectionMinY = task.selectionMinY;
-	result.selectionMaxX = task.selectionMaxX;
-	result.selectionMaxY = task.selectionMaxY;
 
 	if (!task.pixels || task.imageWidth <= 0 || task.imageHeight <= 0 || task.channelCount <= 0)
 		return result;
 
-	const bool showRgbChannels = task.isRgb && task.paintMode == PaintMode::Rgb;
-	const bool showSingleChannel = task.isRgb && isSingleChannelMode(task.paintMode);
-	const int singleChannel = singleChannelIndex(task.paintMode);
-	const int scopeWidth = result.plotWidth;
-	const int scopeHeight = result.plotHeight;
+	const bool showRgbChannels = task.isRgb && task.key.paintMode == PaintMode::Rgb;
+	const bool showSingleChannel = task.isRgb && isSingleChannelMode(task.key.paintMode);
+	const int singleChannel = singleChannelIndex(task.key.paintMode);
+	const int scopeWidth = result.key.plotWidth;
+	const int scopeHeight = result.key.plotHeight;
 	const size_t histogramSize = static_cast<size_t>(scopeWidth) * static_cast<size_t>(scopeHeight);
-	const int sourceMinX = task.selectionActive ? std::clamp(task.selectionMinX, 0, task.imageWidth - 1) : 0;
-	const int sourceMinY = task.selectionActive ? std::clamp(task.selectionMinY, 0, task.imageHeight - 1) : 0;
-	const int sourceMaxX = task.selectionActive ? std::clamp(task.selectionMaxX, sourceMinX, task.imageWidth - 1) : task.imageWidth - 1;
-	const int sourceMaxY = task.selectionActive ? std::clamp(task.selectionMaxY, sourceMinY, task.imageHeight - 1) : task.imageHeight - 1;
+	const int sourceMinX = task.key.selectionActive ? std::clamp(task.key.selectionMinX, 0, task.imageWidth - 1) : 0;
+	const int sourceMinY = task.key.selectionActive ? std::clamp(task.key.selectionMinY, 0, task.imageHeight - 1) : 0;
+	const int sourceMaxX = task.key.selectionActive ? std::clamp(task.key.selectionMaxX, sourceMinX, task.imageWidth - 1) : task.imageWidth - 1;
+	const int sourceMaxY = task.key.selectionActive ? std::clamp(task.key.selectionMaxY, sourceMinY, task.imageHeight - 1) : task.imageHeight - 1;
 	const int sourceWidth = sourceMaxX - sourceMinX + 1;
 
 	if (showRgbChannels)
@@ -509,7 +510,7 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task, S
 		buildIntensityMap(scratch.histogramWhite, scopeWidth, scopeHeight, maxCountWhite, scratch.tempBase, scratch.intensityWhite);
 	}
 
-	result.imageData.assign(histogramSize * 4ull, 0u);
+	result.imageData.resize(histogramSize * 4ull);
 	for (int binY = 0; binY < scopeHeight; binY++)
 	{
 		const int texY = scopeHeight - 1 - binY;
@@ -522,7 +523,7 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task, S
 				const float green = scratch.intensityGreen[index];
 				const float blue = scratch.intensityBlue[index];
 				const float alpha = std::clamp(std::max({red, green, blue}), 0.0f, 1.0f);
-				accumulateTexturePixel(result.imageData, scopeWidth, x, texY, red, green, blue, alpha);
+				setTexturePixel(result.imageData, scopeWidth, x, texY, red, green, blue, alpha);
 			}
 			else if (showSingleChannel)
 			{
@@ -530,13 +531,13 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task, S
 				float red = 0.0f;
 				float green = 0.0f;
 				float blue = 0.0f;
-				colorizeSingleChannel(task.paintMode, mono, red, green, blue);
-				accumulateTexturePixel(result.imageData, scopeWidth, x, texY, red, green, blue, mono);
+				colorizeSingleChannel(task.key.paintMode, mono, red, green, blue);
+				setTexturePixel(result.imageData, scopeWidth, x, texY, red, green, blue, mono);
 			}
 			else
 			{
 				const float mono = scratch.intensityWhite[index];
-				accumulateTexturePixel(result.imageData, scopeWidth, x, texY, mono, mono, mono, mono);
+				setTexturePixel(result.imageData, scopeWidth, x, texY, mono, mono, mono, mono);
 			}
 		}
 	}
@@ -574,18 +575,7 @@ void WaveformPanel::workerLoop()
 		if (workerStop)
 			return;
 
-		if (task.serial != latestRequestedSerial
-			|| task.planeIdx != requestedPlaneIdx
-			|| task.mipIdx != requestedMipIdx
-			|| task.generation != requestedGeneration
-			|| task.plotWidth != requestedPlotWidth
-			|| task.plotHeight != requestedPlotHeight
-			|| task.paintMode != requestedPaintMode
-			|| task.selectionActive != requestedSelectionActive
-			|| task.selectionMinX != requestedSelectionMinX
-			|| task.selectionMinY != requestedSelectionMinY
-			|| task.selectionMaxX != requestedSelectionMaxX
-			|| task.selectionMaxY != requestedSelectionMaxY)
+		if (task.serial != latestRequestedSerial || task.key != requestedKey)
 		{
 			continue;
 		}
@@ -596,37 +586,17 @@ void WaveformPanel::workerLoop()
 }
 
 
-void WaveformPanel::requestBuild(const ImagePlaneData& planeData,
-								 int planeIdx,
-								 int mipIdx,
-								 std::uint64_t generation,
-								 int plotWidth,
-								 int plotHeight,
-								 bool selectionActive,
-								 int selectionMinX,
-								 int selectionMinY,
-								 int selectionMaxX,
-								 int selectionMaxY)
+void WaveformPanel::requestBuild(const ImagePlaneData& planeData, const WaveformRequestKey& key)
 {
 	if (!planeData.pixels || planeData.imageWidth == 0 || planeData.imageHeight == 0 || planeData.len <= 0)
 		return;
 
-	if (valid && (cachedPlaneIdx != planeIdx
-		|| cachedMipIdx != mipIdx
-		|| cachedGeneration != generation
-		|| cachedPaintMode != currentPaintMode
-		|| cachedSelectionActive != selectionActive
-		|| cachedSelectionMinX != selectionMinX
-		|| cachedSelectionMinY != selectionMinY
-		|| cachedSelectionMaxX != selectionMaxX
-		|| cachedSelectionMaxY != selectionMaxY))
+	if (valid && cachedKey != key && !matchesContentIgnoringPlotSize(cachedKey, key))
 	{
-		valid = false;
-		releaseGlResources();
+		resetCachedState();
 	}
 
-	if (isValidFor(planeIdx, mipIdx, generation, plotWidth, plotHeight, currentPaintMode,
-				selectionActive, selectionMinX, selectionMinY, selectionMaxX, selectionMaxY))
+	if (isValidFor(key))
 		return;
 
 	BuildTask task;
@@ -635,48 +605,18 @@ void WaveformPanel::requestBuild(const ImagePlaneData& planeData,
 	task.imageHeight = static_cast<int>(planeData.imageHeight);
 	task.channelCount = planeData.len;
 	task.isRgb = ImageChannelUtils::isRgbChannels(planeData.channels) && planeData.len >= 3;
-	task.selectionActive = selectionActive;
-	task.selectionMinX = selectionMinX;
-	task.selectionMinY = selectionMinY;
-	task.selectionMaxX = selectionMaxX;
-	task.selectionMaxY = selectionMaxY;
-	task.planeIdx = planeIdx;
-	task.mipIdx = mipIdx;
-	task.generation = generation;
-	task.plotWidth = plotWidth;
-	task.plotHeight = plotHeight;
-	task.paintMode = currentPaintMode;
+	task.key = key;
 
 	{
 		std::lock_guard<std::mutex> lock(workerMutex);
-		if (requestedPlaneIdx == planeIdx
-			&& requestedMipIdx == mipIdx
-			&& requestedGeneration == generation
-			&& requestedPlotWidth == plotWidth
-			&& requestedPlotHeight == plotHeight
-			&& requestedPaintMode == currentPaintMode
-			&& requestedSelectionActive == selectionActive
-			&& requestedSelectionMinX == selectionMinX
-			&& requestedSelectionMinY == selectionMinY
-			&& requestedSelectionMaxX == selectionMaxX
-			&& requestedSelectionMaxY == selectionMaxY)
+		if (requestedKey == key)
 		{
 			return;
 		}
 
 		latestRequestedSerial++;
 		task.serial = latestRequestedSerial;
-		requestedPlaneIdx = planeIdx;
-		requestedMipIdx = mipIdx;
-		requestedGeneration = generation;
-		requestedPlotWidth = plotWidth;
-		requestedPlotHeight = plotHeight;
-		requestedPaintMode = currentPaintMode;
-		requestedSelectionActive = selectionActive;
-		requestedSelectionMinX = selectionMinX;
-		requestedSelectionMinY = selectionMinY;
-		requestedSelectionMaxX = selectionMaxX;
-		requestedSelectionMaxY = selectionMaxY;
+		requestedKey = key;
 		pendingTask = std::move(task);
 		hasPendingTask = true;
 	}
@@ -693,18 +633,7 @@ void WaveformPanel::consumeReadyResult()
 		if (!hasReadyResult)
 			return;
 
-		if (readyResult.serial != latestRequestedSerial
-			|| readyResult.planeIdx != requestedPlaneIdx
-			|| readyResult.mipIdx != requestedMipIdx
-			|| readyResult.generation != requestedGeneration
-			|| readyResult.plotWidth != requestedPlotWidth
-			|| readyResult.plotHeight != requestedPlotHeight
-			|| readyResult.paintMode != requestedPaintMode
-			|| readyResult.selectionActive != requestedSelectionActive
-			|| readyResult.selectionMinX != requestedSelectionMinX
-			|| readyResult.selectionMinY != requestedSelectionMinY
-			|| readyResult.selectionMaxX != requestedSelectionMaxX
-			|| readyResult.selectionMaxY != requestedSelectionMaxY)
+		if (readyResult.serial != latestRequestedSerial || readyResult.key != requestedKey)
 		{
 			hasReadyResult = false;
 			return;
@@ -731,14 +660,14 @@ void WaveformPanel::consumeReadyResult()
 		glBindTexture(GL_TEXTURE_2D, texture);
 	}
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	if (textureWidth == result.plotWidth && textureHeight == result.plotHeight)
+	if (textureWidth == result.key.plotWidth && textureHeight == result.key.plotHeight)
 	{
 		glTexSubImage2D(GL_TEXTURE_2D,
 						0,
 						0,
 						0,
-						result.plotWidth,
-						result.plotHeight,
+						result.key.plotWidth,
+						result.key.plotHeight,
 						GL_RGBA,
 						GL_UNSIGNED_BYTE,
 						result.imageData.data());
@@ -748,40 +677,31 @@ void WaveformPanel::consumeReadyResult()
 		glTexImage2D(GL_TEXTURE_2D,
 					0,
 					GL_RGBA8,
-					result.plotWidth,
-					result.plotHeight,
+					result.key.plotWidth,
+					result.key.plotHeight,
 					0,
 					GL_RGBA,
 					GL_UNSIGNED_BYTE,
 					result.imageData.data());
-		textureWidth = result.plotWidth;
-		textureHeight = result.plotHeight;
+		textureWidth = result.key.plotWidth;
+		textureHeight = result.key.plotHeight;
 	}
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	valid = true;
-	cachedPlaneIdx = result.planeIdx;
-	cachedMipIdx = result.mipIdx;
-	cachedGeneration = result.generation;
+	cachedKey = result.key;
 	cachedIsRgb = result.isRgb;
 	cachedMinValue = result.minValue;
 	cachedMaxValue = result.maxValue;
 	cachedMinLogValue = result.minLogValue;
 	cachedMaxLogValue = result.maxLogValue;
-	cachedPlotWidth = result.plotWidth;
-	cachedPlotHeight = result.plotHeight;
-	cachedPaintMode = result.paintMode;
-	cachedSelectionActive = result.selectionActive;
-	cachedSelectionMinX = result.selectionMinX;
-	cachedSelectionMinY = result.selectionMinY;
-	cachedSelectionMaxX = result.selectionMaxX;
-	cachedSelectionMaxY = result.selectionMaxY;
 }
 
 
 void WaveformPanel::draw(int panelWidth,
 						 int panelHeight,
 						 float unit,
+						 bool deferSizeRebuild,
 						 bool sourceReady,
 						 const ImagePlaneData* planeData,
 						 int planeIdx,
@@ -836,13 +756,38 @@ void WaveformPanel::draw(int panelWidth,
 		const ImVec2 plotMax(frameMax.x - axisWidth, frameMax.y);
 		const float plotWidth = std::max(1.0f, plotMax.x - plotMin.x);
 		const float plotHeight = std::max(1.0f, plotMax.y - plotMin.y);
-	const int plotTextureWidth = std::max(1, static_cast<int>(std::round(plotWidth)));
-	const int plotTextureHeight = std::max(1, static_cast<int>(std::round(plotHeight)));
+		const int plotTextureWidth = std::max(1, static_cast<int>(std::round(plotWidth)));
+		const int plotTextureHeight = std::max(1, static_cast<int>(std::round(plotHeight)));
+		const WaveformRequestKey requestKey = makeRequestKey(planeIdx, mipIdx, generation,
+																plotTextureWidth, plotTextureHeight,
+																selectionActive, selectionMinX, selectionMinY,
+																selectionMaxX, selectionMaxY);
+		bool deferBuildForSizeChange = false;
+		if (deferSizeRebuild)
+		{
+			const bool cachedSizeMismatch = valid
+				&& matchesContentIgnoringPlotSize(cachedKey, requestKey)
+				&& cachedKey != requestKey;
+			bool requestedSizeMismatch = false;
+			{
+				std::lock_guard<std::mutex> lock(workerMutex);
+				requestedSizeMismatch = matchesContentIgnoringPlotSize(requestedKey, requestKey)
+					&& requestedKey != requestKey;
+			}
+			deferBuildForSizeChange = cachedSizeMismatch || requestedSizeMismatch;
+		}
 
-	if (sourceReady && planeData != nullptr)
-		requestBuild(*planeData, planeIdx, mipIdx, generation,
-					plotTextureWidth, plotTextureHeight,
-					selectionActive, selectionMinX, selectionMinY, selectionMaxX, selectionMaxY);
+		if (!sourceReady || planeData == nullptr)
+		{
+			if (valid
+				&& !isValidFor(requestKey)
+				&& !matchesContentIgnoringPlotSize(cachedKey, requestKey))
+				resetCachedState();
+		}
+		else if (!deferBuildForSizeChange)
+		{
+			requestBuild(*planeData, requestKey);
+		}
 	consumeReadyResult();
 
 	ImDrawList* drawList = ImGui::GetWindowDrawList();
@@ -879,7 +824,7 @@ void WaveformPanel::draw(int panelWidth,
 		}
 	}
 
-	if (texture != 0)
+	if (valid && texture != 0)
 	{
 		drawList->AddImage(static_cast<ImTextureID>(static_cast<uintptr_t>(texture)),
 						plotMin, plotMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f));
@@ -905,10 +850,10 @@ void WaveformPanel::draw(int panelWidth,
 			&& mousePos.y < plotMax.y;
 		if (hoveredPlot)
 		{
-			const int sourceMinX = cachedSelectionActive ? std::clamp(cachedSelectionMinX, 0, static_cast<int>(planeData->imageWidth) - 1) : 0;
-			const int sourceMinY = cachedSelectionActive ? std::clamp(cachedSelectionMinY, 0, static_cast<int>(planeData->imageHeight) - 1) : 0;
-			const int sourceMaxX = cachedSelectionActive ? std::clamp(cachedSelectionMaxX, sourceMinX, static_cast<int>(planeData->imageWidth) - 1) : static_cast<int>(planeData->imageWidth) - 1;
-			const int sourceMaxY = cachedSelectionActive ? std::clamp(cachedSelectionMaxY, sourceMinY, static_cast<int>(planeData->imageHeight) - 1) : static_cast<int>(planeData->imageHeight) - 1;
+			const int sourceMinX = cachedKey.selectionActive ? std::clamp(cachedKey.selectionMinX, 0, static_cast<int>(planeData->imageWidth) - 1) : 0;
+			const int sourceMinY = cachedKey.selectionActive ? std::clamp(cachedKey.selectionMinY, 0, static_cast<int>(planeData->imageHeight) - 1) : 0;
+			const int sourceMaxX = cachedKey.selectionActive ? std::clamp(cachedKey.selectionMaxX, sourceMinX, static_cast<int>(planeData->imageWidth) - 1) : static_cast<int>(planeData->imageWidth) - 1;
+			const int sourceMaxY = cachedKey.selectionActive ? std::clamp(cachedKey.selectionMaxY, sourceMinY, static_cast<int>(planeData->imageHeight) - 1) : static_cast<int>(planeData->imageHeight) - 1;
 			const int sourceWidth = std::max(1, sourceMaxX - sourceMinX + 1);
 			const float normalizedX = std::clamp((mousePos.x - plotMin.x) / plotWidth, 0.0f, 1.0f);
 			const float normalizedY = std::clamp((plotMax.y - mousePos.y) / plotHeight, 0.0f, 1.0f);
@@ -916,7 +861,7 @@ void WaveformPanel::draw(int panelWidth,
 			const float targetLogValue = cachedMinLogValue + normalizedY * std::max(EPSILON, cachedMaxLogValue - cachedMinLogValue);
 
 			hoverInfo.active = true;
-			hoverInfo.paintMode = cachedPaintMode;
+			hoverInfo.paintMode = cachedKey.paintMode;
 			hoverInfo.sourceX = std::clamp(sourceX, sourceMinX, sourceMaxX);
 			hoverInfo.sourceMinY = sourceMinY;
 			hoverInfo.sourceMaxY = sourceMaxY;
@@ -927,8 +872,8 @@ void WaveformPanel::draw(int panelWidth,
 
 	if (valid && sampleOverlayInfo != nullptr && sampleOverlayInfo->active && planeData != nullptr && planeData->imageWidth > 0)
 	{
-		const int sourceMinX = cachedSelectionActive ? std::clamp(cachedSelectionMinX, 0, static_cast<int>(planeData->imageWidth) - 1) : 0;
-		const int sourceMaxX = cachedSelectionActive ? std::clamp(cachedSelectionMaxX, sourceMinX, static_cast<int>(planeData->imageWidth) - 1) : static_cast<int>(planeData->imageWidth) - 1;
+		const int sourceMinX = cachedKey.selectionActive ? std::clamp(cachedKey.selectionMinX, 0, static_cast<int>(planeData->imageWidth) - 1) : 0;
+		const int sourceMaxX = cachedKey.selectionActive ? std::clamp(cachedKey.selectionMaxX, sourceMinX, static_cast<int>(planeData->imageWidth) - 1) : static_cast<int>(planeData->imageWidth) - 1;
 		if (sampleOverlayInfo->sourceX >= sourceMinX && sampleOverlayInfo->sourceX <= sourceMaxX)
 		{
 			const float normalizedX = (sourceMaxX > sourceMinX)
@@ -936,7 +881,7 @@ void WaveformPanel::draw(int panelWidth,
 				: 0.0f;
 			const float plotX = plotMin.x + normalizedX * plotWidth;
 			const float logSpan = std::max(EPSILON, cachedMaxLogValue - cachedMinLogValue);
-			const bool showRgbOverlay = cachedPaintMode == PaintMode::Rgb && sampleOverlayInfo->isRgb && sampleOverlayInfo->channelCount >= 3;
+			const bool showRgbOverlay = cachedKey.paintMode == PaintMode::Rgb && sampleOverlayInfo->isRgb && sampleOverlayInfo->channelCount >= 3;
 
 			auto drawHorizontalMarker = [&](float value, ImU32 color)
 			{
@@ -954,11 +899,11 @@ void WaveformPanel::draw(int panelWidth,
 			{
 				if (sampleOverlayInfo->isRgb && sampleOverlayInfo->channelCount >= 3)
 				{
-					if (cachedPaintMode == PaintMode::Red)
+					if (cachedKey.paintMode == PaintMode::Red)
 						verticalColor = IM_COL32(255, 96, 96, 220);
-					else if (cachedPaintMode == PaintMode::Green)
+					else if (cachedKey.paintMode == PaintMode::Green)
 						verticalColor = IM_COL32(96, 255, 96, 220);
-					else if (cachedPaintMode == PaintMode::Blue)
+					else if (cachedKey.paintMode == PaintMode::Blue)
 						verticalColor = IM_COL32(96, 160, 255, 220);
 				}
 			}
@@ -976,11 +921,11 @@ void WaveformPanel::draw(int panelWidth,
 			else if (sampleOverlayInfo->isRgb && sampleOverlayInfo->channelCount >= 3)
 			{
 				float value = ImageChannelUtils::computeBt709Luma(sampleOverlayInfo->values[0], sampleOverlayInfo->values[1], sampleOverlayInfo->values[2]);
-				if (cachedPaintMode == PaintMode::Red)
+				if (cachedKey.paintMode == PaintMode::Red)
 					value = sampleOverlayInfo->values[0];
-				else if (cachedPaintMode == PaintMode::Green)
+				else if (cachedKey.paintMode == PaintMode::Green)
 					value = sampleOverlayInfo->values[1];
-				else if (cachedPaintMode == PaintMode::Blue)
+				else if (cachedKey.paintMode == PaintMode::Blue)
 					value = sampleOverlayInfo->values[2];
 				drawHorizontalMarker(value, verticalColor);
 			}
