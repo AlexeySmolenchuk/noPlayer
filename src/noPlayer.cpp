@@ -53,6 +53,33 @@ bool isDerivedSolo(int mode)
 	return mode >= SOLO_H && mode <= SOLO_Y;
 }
 
+int alphaChannelIndex(const ImagePlaneData& plane)
+{
+	return ImageChannelUtils::findChannelIndex(plane.channels, 'a');
+}
+
+bool isSingleAlphaPlane(const ImagePlaneData& plane)
+{
+	return plane.len == 1 && alphaChannelIndex(plane) == 0;
+}
+
+int resolveSoloChannelIndex(int mode, const ImagePlaneData& plane)
+{
+	switch (mode)
+	{
+	case SOLO_R:
+		return (plane.len >= 1) ? 0 : -1;
+	case SOLO_G:
+		return (plane.len >= 2) ? 1 : -1;
+	case SOLO_B:
+		return (plane.len >= 3) ? 2 : -1;
+	case SOLO_A:
+		return alphaChannelIndex(plane);
+	default:
+		return -1;
+	}
+}
+
 bool canRenderSoloMode(int mode, const ImagePlaneData& plane)
 {
 	// Guard solo modes against incompatible channel layouts.
@@ -65,10 +92,15 @@ bool canRenderSoloMode(int mode, const ImagePlaneData& plane)
 	if (isDerivedSolo(mode) && plane.len >= 3 && ImageChannelUtils::isRgbChannels(plane.channels))
 		return true;
 
-	if (mode == SOLO_A && plane.len >= 4)
-		return true;
+	if (mode == SOLO_A)
+		return alphaChannelIndex(plane) >= 0;
 
 	return false;
+}
+
+int sanitizeSoloModeForPlane(int mode, const ImagePlaneData& plane)
+{
+	return canRenderSoloMode(mode, plane) ? mode : SOLO_NONE;
 }
 
 void rgbToHsvy(float r, float g, float b, float& h, float& s, float& v, float& y)
@@ -229,7 +261,7 @@ void dropCallback(GLFWwindow* window, int count, const char** paths)
 {
 	// Replace current image with the first dropped path.
 	NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(window));
-	view->clear();
+	view->clear(false);
 	view->init(paths[0]);
 }
 
@@ -337,7 +369,7 @@ void keyCallback(GLFWwindow* mainWindow, int key, int scancode, int action, int 
 		std::string currentFileName = view->getFileName();
 		if (!currentFileName.empty())
 		{
-			view->clear();
+			view->clear(true);
 			view->init(currentFileName.c_str(), false);
 		}
 	}
@@ -471,7 +503,7 @@ NoPlayer::init(const char* fileName, bool fresh)
 }
 
 
-void NoPlayer::clear()
+void NoPlayer::clear(bool preserveViewState)
 {
 	std::unique_lock<std::mutex> lock(mtx);
 
@@ -484,12 +516,66 @@ void NoPlayer::clear()
 
 	releasePlaneTextures(imagePlanes);
 	imagePlanes.clear();
-	activePlaneIdx = 0;
-	activeMIP = 0;
-	inspectRegionActive = false;
 	inspectRegionDragging = false;
 	inspectRegionMoved = false;
+	if (!preserveViewState)
+	{
+		activePlaneIdx = 0;
+		activeMIP = 0;
+		channelSoloing = SOLO_NONE;
+		inspectRegionActive = false;
+	}
 	waveformPanel.invalidate();
+}
+
+
+bool NoPlayer::focusAlphaView()
+{
+	if (imagePlanes.empty())
+		return false;
+
+	const auto applyAlphaTarget = [this](int planeIndex)
+	{
+		activePlaneIdx = planeIndex;
+		activeMIP = clampMipIndexForPlane(imagePlanes[activePlaneIdx], activeMIP);
+		const ImagePlaneData& planeData = imagePlanes[activePlaneIdx].MIPs[activeMIP];
+		channelSoloing = isSingleAlphaPlane(planeData) ? SOLO_NONE : SOLO_A;
+		waveformPanel.invalidate();
+	};
+
+	activeMIP = clampMipIndexForPlane(imagePlanes[activePlaneIdx], activeMIP);
+	const ImagePlaneData& currentPlane = imagePlanes[activePlaneIdx].MIPs[activeMIP];
+	if (alphaChannelIndex(currentPlane) >= 0)
+	{
+		channelSoloing = isSingleAlphaPlane(currentPlane) ? SOLO_NONE : SOLO_A;
+		return true;
+	}
+
+	int fallbackPlaneIndex = -1;
+	for (int planeIndex = 0; planeIndex < static_cast<int>(imagePlanes.size()); planeIndex++)
+	{
+		const int mipIndex = clampMipIndexForPlane(imagePlanes[planeIndex], activeMIP);
+		const ImagePlaneData& planeData = imagePlanes[planeIndex].MIPs[mipIndex];
+		if (alphaChannelIndex(planeData) < 0)
+			continue;
+
+		if (isSingleAlphaPlane(planeData))
+		{
+			applyAlphaTarget(planeIndex);
+			return true;
+		}
+
+		if (fallbackPlaneIndex < 0)
+			fallbackPlaneIndex = planeIndex;
+	}
+
+	if (fallbackPlaneIndex >= 0)
+	{
+		applyAlphaTarget(fallbackPlaneIndex);
+		return true;
+	}
+
+	return false;
 }
 
 void NoPlayer::bindOCIOTextures()
@@ -785,6 +871,8 @@ void NoPlayer::draw()
 		planeReady = planeData.ready;
 	}
 	float compensateMIP = powf(2.0f, planeData.mip);
+	const int effectiveSoloMode = sanitizeSoloModeForPlane(channelSoloing, planeData);
+	const int soloChannelIndex = resolveSoloChannelIndex(effectiveSoloMode, planeData);
 
 	static bool ui = true;
 	static int lag = 0;
@@ -1040,14 +1128,16 @@ void NoPlayer::draw()
 				float min_value = std::numeric_limits<float>::max();
 				float max_value = std::numeric_limits<float>::lowest();
 				float t;
+				const int effectiveSoloMode = sanitizeSoloModeForPlane(channelSoloing, planeData);
+				const int soloChannelIndex = resolveSoloChannelIndex(effectiveSoloMode, planeData);
 				planeData.getRange(pixel_min, pixel_max);
 
-				if (channelSoloing >= SOLO_R && channelSoloing <= SOLO_B && channelSoloing <= planeData.len)
+				if (effectiveSoloMode >= SOLO_R && effectiveSoloMode <= SOLO_B && soloChannelIndex >= 0)
 				{
-					min_value = pixel_min[channelSoloing-1];
-					max_value = pixel_max[channelSoloing-1];
+					min_value = pixel_min[soloChannelIndex];
+					max_value = pixel_max[soloChannelIndex];
 				}
-				else if (isDerivedSolo(channelSoloing) && planeData.len >= 3 && ImageChannelUtils::isRgbChannels(plane.channels) && planeData.pixels)
+				else if (isDerivedSolo(effectiveSoloMode) && planeData.len >= 3 && ImageChannelUtils::isRgbChannels(plane.channels) && planeData.pixels)
 				{
 					const precision* pixels = planeData.pixels.get();
 					for (unsigned int y = 0; y < planeData.imageHeight; y++)
@@ -1057,7 +1147,7 @@ void NoPlayer::draw()
 							const size_t pixelOffset = (static_cast<size_t>(y) * static_cast<size_t>(planeData.imageWidth)
 													 + static_cast<size_t>(x)) * static_cast<size_t>(planeData.len);
 							float value = 0.0f;
-							if (computeDerivedSoloValue(channelSoloing,
+							if (computeDerivedSoloValue(effectiveSoloMode,
 														static_cast<float>(pixels[pixelOffset + 0]),
 														static_cast<float>(pixels[pixelOffset + 1]),
 														static_cast<float>(pixels[pixelOffset + 2]),
@@ -1069,10 +1159,10 @@ void NoPlayer::draw()
 						}
 					}
 				}
-				else if (channelSoloing == SOLO_A && planeData.len >= 4)
+				else if (effectiveSoloMode == SOLO_A && soloChannelIndex >= 0)
 				{
-					min_value = pixel_min[3];
-					max_value = pixel_max[3];
+					min_value = pixel_min[soloChannelIndex];
+					max_value = pixel_max[soloChannelIndex];
 				}
 				else
 				{
@@ -1129,7 +1219,7 @@ void NoPlayer::draw()
 			setChannelSoloing(SOLO_Y);
 
 		if (ImGui::IsKeyPressed(ImGuiKey_8))
-			setChannelSoloing(SOLO_A);
+			focusAlphaView();
 	}
 
 	if (help)
@@ -1305,17 +1395,17 @@ void NoPlayer::draw()
 
 			if(activePlaneIdx == n)
 			{
-				if (channelSoloing == SOLO_NONE)
+				if (effectiveSoloMode == SOLO_NONE)
 				{
 					ImGui::Text(plane.channels.c_str());
 				}
-				else if (isDerivedSolo(channelSoloing) && planeData.len >= 3 && ImageChannelUtils::isRgbChannels(plane.channels))
+				else if (isDerivedSolo(effectiveSoloMode) && planeData.len >= 3 && ImageChannelUtils::isRgbChannels(plane.channels))
 				{
 					const char* derived = "HSVY";
 					for (int i = 0; i < 4; i++)
 					{
 						if (i) ImGui::SameLine(0, 0);
-						ImGui::TextColored(((SOLO_H + i) == channelSoloing) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1),
+						ImGui::TextColored(((SOLO_H + i) == effectiveSoloMode) ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1),
 										"%c", derived[i]);
 					}
 				}
@@ -1324,8 +1414,7 @@ void NoPlayer::draw()
 						for (int i = 0; i < planeData.len; i++)
 						{
 							if (i) ImGui::SameLine(0, 0);
-							const bool isSelectedChannel = (((i+1) == channelSoloing) && channelSoloing <= SOLO_B)
-								|| (i == 3 && channelSoloing == SOLO_A);
+							const bool isSelectedChannel = (i == soloChannelIndex);
 							ImGui::TextColored(isSelectedChannel ? ImVec4(1,1,1,1) : ImVec4(0.5,0.5,0.5,1),
 										plane.channels.substr(i, 1).c_str());
 						}
@@ -1952,42 +2041,39 @@ void NoPlayer::draw()
 	glViewport(imageViewportX, imageViewportY, imageViewportW, imageViewportH);
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
-	const bool renderSoloMode = canRenderSoloMode(channelSoloing, planeData);
-	if(renderSoloMode)
-	{
-		// Push per-frame uniforms and draw image texture.
-		glUseProgram(shader);
+	// Push per-frame uniforms and draw image texture.
+	glUseProgram(shader);
 
-		glUniform2f(shaderUniforms.offset, (offsetX - shift.x + centerX * scale * factor * compensateMIP) / (float)imageViewportW,
-										-(offsetY - shift.y + centerY * scale * factor * compensateMIP) / (float)imageViewportH);
-		glUniform2f(shaderUniforms.scale, scale * factor * compensateMIP * planeData.imageWidth / (float)imageViewportW * planeData.pixelAspect,
-									   scale * factor * compensateMIP * planeData.imageHeight / (float)imageViewportH);
+	glUniform2f(shaderUniforms.offset, (offsetX - shift.x + centerX * scale * factor * compensateMIP) / (float)imageViewportW,
+									-(offsetY - shift.y + centerY * scale * factor * compensateMIP) / (float)imageViewportH);
+	glUniform2f(shaderUniforms.scale, scale * factor * compensateMIP * planeData.imageWidth / (float)imageViewportW * planeData.pixelAspect,
+								   scale * factor * compensateMIP * planeData.imageHeight / (float)imageViewportH);
 
-		glUniform1f(shaderUniforms.gainValues, plane.gainValues);
-		glUniform1f(shaderUniforms.offsetValues, plane.offsetValues);
-		glUniform1i(shaderUniforms.soloing, channelSoloing);
-		glUniform1i(shaderUniforms.nchannels, planeData.len);
-		glUniform1i(shaderUniforms.doOCIO, plane.doOCIO);
-		glUniform1i(shaderUniforms.checkNaN, plane.checkNaN);
+	glUniform1f(shaderUniforms.gainValues, plane.gainValues);
+	glUniform1f(shaderUniforms.offsetValues, plane.offsetValues);
+	glUniform1i(shaderUniforms.soloing, effectiveSoloMode);
+	glUniform1i(shaderUniforms.soloChannelIndex, soloChannelIndex);
+	glUniform1i(shaderUniforms.nchannels, planeData.len);
+	glUniform1i(shaderUniforms.doOCIO, plane.doOCIO);
+	glUniform1i(shaderUniforms.checkNaN, plane.checkNaN);
 
-		static float flash = 0;
-		flash += 1.0f/100;
-		if (flash>1.0)
-			flash = 0;
+	static float flash = 0;
+	flash += 1.0f/100;
+	if (flash>1.0)
+		flash = 0;
 
-		glUniform1f(shaderUniforms.flash, flash);
+	glUniform1f(shaderUniforms.flash, flash);
 
-		glDisable(GL_BLEND);
-		glDisable(GL_DEPTH_TEST);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, planeData.glTexture);
-		// Bind OCIO LUT textures referenced by the active shader.
-		bindOCIOTextures();
-		glBindVertexArray(VAO);
-		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-	}
+	glDisable(GL_BLEND);
+	glDisable(GL_DEPTH_TEST);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, planeData.glTexture);
+	// Bind OCIO LUT textures referenced by the active shader.
+	bindOCIOTextures();
+	glBindVertexArray(VAO);
+	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
-	if (!planeData.windowMatchData || !renderSoloMode)
+	if (!planeData.windowMatchData)
 	{
 		// Draw display-window outline when needed.
 		glEnable(GL_BLEND);

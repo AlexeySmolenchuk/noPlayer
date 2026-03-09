@@ -33,6 +33,22 @@ inline bool matchesChannels(std::string_view channels, char first, char second, 
 		&& isChannel(channels[2], third);
 }
 
+inline bool isChannelChar(char value, char expected)
+{
+	return value == expected || value == static_cast<char>(expected - 'a' + 'A');
+}
+
+inline int findChannelIndex(std::string_view channels, char expected)
+{
+	for (size_t index = 0; index < channels.size(); index++)
+	{
+		if (isChannelChar(channels[index], expected))
+			return static_cast<int>(index);
+	}
+
+	return -1;
+}
+
 inline bool isRgbChannels(std::string_view channels)
 {
 	return matchesChannels(channels, 'r', 'g', 'b');

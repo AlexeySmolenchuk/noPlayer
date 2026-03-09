@@ -10,6 +10,7 @@ struct ImageShaderUniforms
 	GLint gainValues = -1;
 	GLint offsetValues = -1;
 	GLint soloing = -1;
+	GLint soloChannelIndex = -1;
 	GLint nchannels = -1;
 	GLint doOCIO = -1;
 	GLint checkNaN = -1;
@@ -23,6 +24,7 @@ struct ImageShaderUniforms
 		gainValues = glGetUniformLocation(program, "gainValues");
 		offsetValues = glGetUniformLocation(program, "offsetValues");
 		soloing = glGetUniformLocation(program, "soloing");
+		soloChannelIndex = glGetUniformLocation(program, "soloChannelIndex");
 		nchannels = glGetUniformLocation(program, "nchannels");
 		doOCIO = glGetUniformLocation(program, "doOCIO");
 		checkNaN = glGetUniformLocation(program, "checkNaN");

@@ -122,7 +122,7 @@ These controls apply to the image view.
 | `5` | Solo `S` |
 | `6` | Solo `V` |
 | `7` | Solo `Y` |
-| `8` | Solo `A` |
+| `8` | Solo alpha on the current plane, or jump to another alpha plane |
 | `0` | Reset gain and offset |
 | `-` | Decrease gain by one stop |
 | `=` | Increase gain by one stop |
@@ -136,7 +136,8 @@ These controls apply to the image view.
 Notes:
 
 - `H`, `S`, `V`, and `Y` solo modes only make sense on RGB planes.
-- `A` solo only works when the current plane has an alpha channel.
+- `8` prefers the current plane when it already has an alpha channel.
+- If the current plane has no alpha, `8` switches to another alpha-bearing plane and prefers a single-channel `A` plane when available.
 - `R` auto-fit uses the currently active solo mode when possible.
 
 ## Inspect mode

@@ -97,7 +97,7 @@ public:
 	 *
 	 * Called before opening another image.
 	 */
-	void clear();
+	void clear(bool preserveViewState = false);
 
 	/**
 	 * @brief Current image path for reload and UI display.
@@ -179,6 +179,15 @@ private:
 	 * @param plane Plane payload to queue.
 	 */
 	void enqueueLoadLocked(ImagePlaneData* plane);
+
+	/**
+	 * @brief Focus alpha on the current plane or switch to an alpha-bearing plane.
+	 *
+	 * Called by the `8` keyboard shortcut.
+	 *
+	 * @return `true` when an alpha view could be selected.
+	 */
+	bool focusAlphaView();
 
 	/**
 	 * @brief Queue record for async load and texture generation.

@@ -269,6 +269,7 @@ void NoPlayer::configureOCIO()
 		uniform float gainValues;
 		uniform float offsetValues;
 		uniform int soloing;
+		uniform int soloChannelIndex;
 		uniform int nchannels;
 		uniform float flash;
 		uniform int doOCIO;
@@ -355,43 +356,40 @@ void NoPlayer::configureOCIO()
 				FragColor = OCIODisplay(fragment);
 
 			if (soloing!=0){
-				switch (soloing) {
-				case 1:
-					FragColor = FragColor.rrrr;
-					break;
-				case 2:
-					FragColor = FragColor.gggg;
-					break;
-				case 3:
-					FragColor = FragColor.bbbb;
-					break;
-				case 4:
+				if ((soloing == 1 || soloing == 2 || soloing == 3 || soloing == 8)
+					&& soloChannelIndex >= 0
+					&& soloChannelIndex < nchannels)
 				{
-					vec3 hsv = rgbToHsv(rawFragment.rgb);
-					FragColor = vec4(hsv.xxx, FragColor.a);
-					break;
+					FragColor = vec4(FragColor[soloChannelIndex]);
 				}
-				case 5:
+				else
 				{
-					vec3 hsv = rgbToHsv(rawFragment.rgb);
-					FragColor = vec4(hsv.yyy, FragColor.a);
-					break;
-				}
-				case 6:
-				{
-					vec3 hsv = rgbToHsv(rawFragment.rgb);
-					FragColor = vec4(hsv.zzz, FragColor.a);
-					break;
-				}
-				case 7:
-				{
-					float y = rgbToY(rawFragment.rgb);
-					FragColor = vec4(vec3(y), FragColor.a);
-					break;
-				}
-				case 8:
-					FragColor = FragColor.aaaa;
-					break;
+					switch (soloing) {
+					case 4:
+					{
+						vec3 hsv = rgbToHsv(rawFragment.rgb);
+						FragColor = vec4(hsv.xxx, FragColor.a);
+						break;
+					}
+					case 5:
+					{
+						vec3 hsv = rgbToHsv(rawFragment.rgb);
+						FragColor = vec4(hsv.yyy, FragColor.a);
+						break;
+					}
+					case 6:
+					{
+						vec3 hsv = rgbToHsv(rawFragment.rgb);
+						FragColor = vec4(hsv.zzz, FragColor.a);
+						break;
+					}
+					case 7:
+					{
+						float y = rgbToY(rawFragment.rgb);
+						FragColor = vec4(vec3(y), FragColor.a);
+						break;
+					}
+					}
 				}
 			}
 		}
