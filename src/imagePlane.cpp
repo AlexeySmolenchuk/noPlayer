@@ -10,10 +10,6 @@ bool ImagePlaneData::load()
 {
 	using namespace OIIO;
 
-	// Define fallback pixel value for missing tiles/regions.
-	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };
-	OIIO::attribute("missingcolor", TypeDesc("float[4]"), &missing);
-
 	pixels = std::shared_ptr<precision[]>(new precision[imageWidth * imageHeight * len]);
 	rangeCacheValid = false;
 	selectionAverageValid = false;
