@@ -44,7 +44,7 @@ public:
 	struct SampleOverlayInfo
 	{
 		bool active = false;
-		bool isRgb = false;
+		ImageChannelUtils::WaveformColorInterpretation colorInterpretation = ImageChannelUtils::WaveformColorInterpretation::Mono;
 		int channelCount = 0;
 		int sourceX = 0;
 		float values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -130,7 +130,7 @@ private:
 		int imageWidth = 0;
 		int imageHeight = 0;
 		int channelCount = 0;
-		bool isRgb = false;
+		ImageChannelUtils::WaveformColorInterpretation colorInterpretation = ImageChannelUtils::WaveformColorInterpretation::Mono;
 		WaveformRequestKey key;
 		std::uint64_t serial = 0;
 	};
@@ -138,7 +138,6 @@ private:
 	struct BuildResult
 	{
 		std::vector<unsigned char> imageData;
-		bool isRgb = false;
 		float minValue = 0.0f;
 		float maxValue = 1.0f;
 		float minLogValue = -8.0f;
@@ -185,7 +184,6 @@ private:
 private:
 	bool valid = false;
 	WaveformRequestKey cachedKey;
-	bool cachedIsRgb = false;
 	float cachedMinValue = 0.0f;
 	float cachedMaxValue = 1.0f;
 	float cachedMinLogValue = -8.0f;

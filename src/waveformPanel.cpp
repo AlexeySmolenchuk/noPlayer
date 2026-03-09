@@ -172,7 +172,6 @@ void WaveformPanel::resetCachedState()
 {
 	valid = false;
 	cachedKey = WaveformRequestKey();
-	cachedIsRgb = false;
 	cachedMinValue = 0.0f;
 	cachedMaxValue = 1.0f;
 	cachedMinLogValue = DEFAULT_LOG_FLOOR;
@@ -275,7 +274,6 @@ bool WaveformPanel::matchesContentIgnoringPlotSize(const WaveformRequestKey& lef
 WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task, ScratchBuffers& scratch)
 {
 	BuildResult result;
-	result.isRgb = task.isRgb;
 	result.key = task.key;
 	result.key.plotWidth = std::max(1, result.key.plotWidth);
 	result.key.plotHeight = std::max(1, result.key.plotHeight);
@@ -284,8 +282,9 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task, S
 	if (!task.pixels || task.imageWidth <= 0 || task.imageHeight <= 0 || task.channelCount <= 0)
 		return result;
 
-	const bool showRgbChannels = task.isRgb && task.key.paintMode == PaintMode::Rgb;
-	const bool showSingleChannel = task.isRgb && isSingleChannelMode(task.key.paintMode);
+	const bool hasRgbTriplet = ImageChannelUtils::hasWaveformRgbTriplet(task.colorInterpretation);
+	const bool showRgbChannels = hasRgbTriplet && task.key.paintMode == PaintMode::Rgb;
+	const bool showSingleChannel = hasRgbTriplet && isSingleChannelMode(task.key.paintMode);
 	const int singleChannel = singleChannelIndex(task.key.paintMode);
 	const int scopeWidth = result.key.plotWidth;
 	const int scopeHeight = result.key.plotHeight;
@@ -332,26 +331,63 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task, S
 		{
 			const size_t pixelOffset = (static_cast<size_t>(y) * static_cast<size_t>(task.imageWidth) + static_cast<size_t>(x))
 									 * static_cast<size_t>(task.channelCount);
+			const precision* pixel = pixels + pixelOffset;
 			if (showRgbChannels)
 			{
-				for (int channel = 0; channel < 3; channel++)
+				if (task.colorInterpretation == ImageChannelUtils::WaveformColorInterpretation::Rgb)
 				{
-					const float value = static_cast<float>(pixels[pixelOffset + static_cast<size_t>(channel)]);
-					if (!std::isfinite(value))
-						continue;
-					minValue = std::min(minValue, value);
-					maxValue = std::max(maxValue, value);
-					if (value > EPSILON)
+					for (int channel = 0; channel < 3; channel++)
 					{
-						minPositiveValue = std::min(minPositiveValue, value);
-						maxPositiveValue = std::max(maxPositiveValue, value);
+						const float value = static_cast<float>(pixel[static_cast<size_t>(channel)]);
+						if (!std::isfinite(value))
+							continue;
+						minValue = std::min(minValue, value);
+						maxValue = std::max(maxValue, value);
+						if (value > EPSILON)
+						{
+							minPositiveValue = std::min(minPositiveValue, value);
+							maxPositiveValue = std::max(maxPositiveValue, value);
+						}
+					}
+				}
+				else
+				{
+					float red = 0.0f;
+					float green = 0.0f;
+					float blue = 0.0f;
+					if (!ImageChannelUtils::sampleWaveformRgbTriplet(pixel, task.colorInterpretation, red, green, blue))
+						continue;
+
+					const float values[3] = {red, green, blue};
+					for (float value : values)
+					{
+						minValue = std::min(minValue, value);
+						maxValue = std::max(maxValue, value);
+						if (value > EPSILON)
+						{
+							minPositiveValue = std::min(minPositiveValue, value);
+							maxPositiveValue = std::max(maxPositiveValue, value);
+						}
 					}
 				}
 			}
 			else if (showSingleChannel)
 			{
-					const float value = static_cast<float>(pixels[pixelOffset + static_cast<size_t>(singleChannel)]);
-				if (!std::isfinite(value))
+				float value = 0.0f;
+				if (!ImageChannelUtils::sampleWaveformRgbChannel(pixel, task.colorInterpretation, singleChannel, value))
+					continue;
+				minValue = std::min(minValue, value);
+				maxValue = std::max(maxValue, value);
+				if (value > EPSILON)
+				{
+					minPositiveValue = std::min(minPositiveValue, value);
+					maxPositiveValue = std::max(maxPositiveValue, value);
+				}
+			}
+			else if (hasRgbTriplet)
+			{
+				float value = 0.0f;
+				if (!ImageChannelUtils::sampleWaveformLuma(pixel, task.colorInterpretation, value))
 					continue;
 				minValue = std::min(minValue, value);
 				maxValue = std::max(maxValue, value);
@@ -363,17 +399,7 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task, S
 			}
 			else
 			{
-				float value = static_cast<float>(pixels[pixelOffset]);
-				if (task.isRgb)
-				{
-					const float red = static_cast<float>(pixels[pixelOffset + 0]);
-					const float green = static_cast<float>(pixels[pixelOffset + 1]);
-					const float blue = static_cast<float>(pixels[pixelOffset + 2]);
-					if (!std::isfinite(red) || !std::isfinite(green) || !std::isfinite(blue))
-						continue;
-					value = ImageChannelUtils::computeBt709Luma(red, green, blue);
-				}
-
+				const float value = static_cast<float>(pixel[0]);
 				if (!std::isfinite(value))
 					continue;
 				minValue = std::min(minValue, value);
@@ -427,71 +453,113 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task, S
 			const int localX = x - sourceMinX;
 			const size_t pixelOffset = (static_cast<size_t>(y) * static_cast<size_t>(task.imageWidth) + static_cast<size_t>(x))
 									 * static_cast<size_t>(task.channelCount);
+			const precision* pixel = pixels + pixelOffset;
 			if (showRgbChannels)
 			{
-				for (int channel = 0; channel < 3; channel++)
+				if (task.colorInterpretation == ImageChannelUtils::WaveformColorInterpretation::Rgb)
 				{
-					const float value = static_cast<float>(pixels[pixelOffset + static_cast<size_t>(channel)]);
-					if (!std::isfinite(value))
+					for (int channel = 0; channel < 3; channel++)
+					{
+						const float value = static_cast<float>(pixel[static_cast<size_t>(channel)]);
+						if (!std::isfinite(value))
+							continue;
+
+						const float normalized = std::clamp((toLogValue(value, minLogValue) - minLogValue) / logValueRange, 0.0f, 1.0f);
+						const int binY = std::clamp(static_cast<int>(std::round(normalized * static_cast<float>(lastScopeRow))),
+													0, lastScopeRow);
+						const int binX = scratch.xBins[static_cast<size_t>(localX)];
+						const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(binX);
+
+						if (channel == 0)
+						{
+							scratch.histogramRed[index]++;
+							maxCountRed = std::max(maxCountRed, scratch.histogramRed[index]);
+						}
+						else if (channel == 1)
+						{
+							scratch.histogramGreen[index]++;
+							maxCountGreen = std::max(maxCountGreen, scratch.histogramGreen[index]);
+						}
+						else
+						{
+							scratch.histogramBlue[index]++;
+							maxCountBlue = std::max(maxCountBlue, scratch.histogramBlue[index]);
+						}
+					}
+				}
+				else
+				{
+					float red = 0.0f;
+					float green = 0.0f;
+					float blue = 0.0f;
+					if (!ImageChannelUtils::sampleWaveformRgbTriplet(pixel, task.colorInterpretation, red, green, blue))
 						continue;
 
-					const float normalized = std::clamp((toLogValue(value, minLogValue) - minLogValue) / logValueRange, 0.0f, 1.0f);
-					const int binY = std::clamp(static_cast<int>(std::round(normalized * static_cast<float>(lastScopeRow))),
-												0, lastScopeRow);
+					const float values[3] = {red, green, blue};
+					for (int channel = 0; channel < 3; channel++)
+					{
+						const float normalized = std::clamp((toLogValue(values[channel], minLogValue) - minLogValue) / logValueRange, 0.0f, 1.0f);
+						const int binY = std::clamp(static_cast<int>(std::round(normalized * static_cast<float>(lastScopeRow))),
+													0, lastScopeRow);
 						const int binX = scratch.xBins[static_cast<size_t>(localX)];
-					const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(binX);
+						const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(binX);
 
-					if (channel == 0)
-					{
-						scratch.histogramRed[index]++;
-						maxCountRed = std::max(maxCountRed, scratch.histogramRed[index]);
-					}
-					else if (channel == 1)
-					{
-						scratch.histogramGreen[index]++;
-						maxCountGreen = std::max(maxCountGreen, scratch.histogramGreen[index]);
-					}
-					else
-					{
-						scratch.histogramBlue[index]++;
-						maxCountBlue = std::max(maxCountBlue, scratch.histogramBlue[index]);
+						if (channel == 0)
+						{
+							scratch.histogramRed[index]++;
+							maxCountRed = std::max(maxCountRed, scratch.histogramRed[index]);
+						}
+						else if (channel == 1)
+						{
+							scratch.histogramGreen[index]++;
+							maxCountGreen = std::max(maxCountGreen, scratch.histogramGreen[index]);
+						}
+						else
+						{
+							scratch.histogramBlue[index]++;
+							maxCountBlue = std::max(maxCountBlue, scratch.histogramBlue[index]);
+						}
 					}
 				}
 			}
 			else if (showSingleChannel)
 			{
-				const float value = static_cast<float>(pixels[pixelOffset + static_cast<size_t>(singleChannel)]);
-				if (!std::isfinite(value))
+				float value = 0.0f;
+				if (!ImageChannelUtils::sampleWaveformRgbChannel(pixel, task.colorInterpretation, singleChannel, value))
 					continue;
 
 				const float normalized = std::clamp((toLogValue(value, minLogValue) - minLogValue) / logValueRange, 0.0f, 1.0f);
 				const int binY = std::clamp(static_cast<int>(std::round(normalized * static_cast<float>(lastScopeRow))),
 											0, lastScopeRow);
-					const int binX = scratch.xBins[static_cast<size_t>(localX)];
+				const int binX = scratch.xBins[static_cast<size_t>(localX)];
+				const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(binX);
+				scratch.histogramWhite[index]++;
+				maxCountWhite = std::max(maxCountWhite, scratch.histogramWhite[index]);
+			}
+			else if (hasRgbTriplet)
+			{
+				float value = 0.0f;
+				if (!ImageChannelUtils::sampleWaveformLuma(pixel, task.colorInterpretation, value))
+					continue;
+
+				const float normalized = std::clamp((toLogValue(value, minLogValue) - minLogValue) / logValueRange, 0.0f, 1.0f);
+				const int binY = std::clamp(static_cast<int>(std::round(normalized * static_cast<float>(lastScopeRow))),
+											0, lastScopeRow);
+				const int binX = scratch.xBins[static_cast<size_t>(localX)];
 				const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(binX);
 				scratch.histogramWhite[index]++;
 				maxCountWhite = std::max(maxCountWhite, scratch.histogramWhite[index]);
 			}
 			else
 			{
-				float value = static_cast<float>(pixels[pixelOffset]);
-				if (task.isRgb)
-				{
-					const float red = static_cast<float>(pixels[pixelOffset + 0]);
-					const float green = static_cast<float>(pixels[pixelOffset + 1]);
-					const float blue = static_cast<float>(pixels[pixelOffset + 2]);
-					if (!std::isfinite(red) || !std::isfinite(green) || !std::isfinite(blue))
-						continue;
-					value = ImageChannelUtils::computeBt709Luma(red, green, blue);
-				}
-
+				const float value = static_cast<float>(pixel[0]);
 				if (!std::isfinite(value))
 					continue;
 
 				const float normalized = std::clamp((toLogValue(value, minLogValue) - minLogValue) / logValueRange, 0.0f, 1.0f);
 				const int binY = std::clamp(static_cast<int>(std::round(normalized * static_cast<float>(lastScopeRow))),
 											0, lastScopeRow);
-					const int binX = scratch.xBins[static_cast<size_t>(localX)];
+				const int binX = scratch.xBins[static_cast<size_t>(localX)];
 				const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(binX);
 				scratch.histogramWhite[index]++;
 				maxCountWhite = std::max(maxCountWhite, scratch.histogramWhite[index]);
@@ -604,7 +672,7 @@ void WaveformPanel::requestBuild(const ImagePlaneData& planeData, const Waveform
 	task.imageWidth = static_cast<int>(planeData.imageWidth);
 	task.imageHeight = static_cast<int>(planeData.imageHeight);
 	task.channelCount = planeData.len;
-	task.isRgb = ImageChannelUtils::isRgbChannels(planeData.channels) && planeData.len >= 3;
+	task.colorInterpretation = ImageChannelUtils::waveformColorInterpretation(planeData.channels, planeData.len);
 	task.key = key;
 
 	{
@@ -690,7 +758,6 @@ void WaveformPanel::consumeReadyResult()
 
 	valid = true;
 	cachedKey = result.key;
-	cachedIsRgb = result.isRgb;
 	cachedMinValue = result.minValue;
 	cachedMaxValue = result.maxValue;
 	cachedMinLogValue = result.minLogValue;
@@ -881,7 +948,11 @@ void WaveformPanel::draw(int panelWidth,
 				: 0.0f;
 			const float plotX = plotMin.x + normalizedX * plotWidth;
 			const float logSpan = std::max(EPSILON, cachedMaxLogValue - cachedMinLogValue);
-			const bool showRgbOverlay = cachedKey.paintMode == PaintMode::Rgb && sampleOverlayInfo->isRgb && sampleOverlayInfo->channelCount >= 3;
+			const bool overlayHasRgbTriplet = ImageChannelUtils::hasWaveformRgbTriplet(sampleOverlayInfo->colorInterpretation)
+				&& sampleOverlayInfo->channelCount >= 3;
+			const bool showRgbOverlay = cachedKey.paintMode == PaintMode::Rgb
+				&& overlayHasRgbTriplet
+				&& !ImageChannelUtils::isReplicatedWaveformRgb(sampleOverlayInfo->colorInterpretation);
 
 			auto drawHorizontalMarker = [&](float value, ImU32 color)
 			{
@@ -897,7 +968,7 @@ void WaveformPanel::draw(int panelWidth,
 			ImU32 verticalColor = IM_COL32(240, 240, 220, 220);
 			if (!showRgbOverlay)
 			{
-				if (sampleOverlayInfo->isRgb && sampleOverlayInfo->channelCount >= 3)
+				if (overlayHasRgbTriplet)
 				{
 					if (cachedKey.paintMode == PaintMode::Red)
 						verticalColor = IM_COL32(255, 96, 96, 220);
@@ -918,7 +989,7 @@ void WaveformPanel::draw(int panelWidth,
 				drawHorizontalMarker(sampleOverlayInfo->values[1], IM_COL32(96, 255, 96, 220));
 				drawHorizontalMarker(sampleOverlayInfo->values[2], IM_COL32(96, 160, 255, 220));
 			}
-			else if (sampleOverlayInfo->isRgb && sampleOverlayInfo->channelCount >= 3)
+			else if (overlayHasRgbTriplet)
 			{
 				float value = ImageChannelUtils::computeBt709Luma(sampleOverlayInfo->values[0], sampleOverlayInfo->values[1], sampleOverlayInfo->values[2]);
 				if (cachedKey.paintMode == PaintMode::Red)
@@ -951,7 +1022,7 @@ void WaveformPanel::draw(int panelWidth,
 			const float value = std::exp2(static_cast<float>(stop));
 			std::snprintf(label, sizeof(label), "%.3f", value);
 			const ImVec2 labelSize = ImGui::CalcTextSize(label);
-				drawList->AddText(ImVec2(frameMax.x - labelSize.x - 6.0f, y - labelSize.y * 0.5f),
+			drawList->AddText(ImVec2(frameMax.x - labelSize.x - 6.0f, y - labelSize.y * 0.5f),
 								IM_COL32(128, 136, 126, 220), label);
 		}
 	}

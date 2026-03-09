@@ -775,6 +775,8 @@ void NoPlayer::draw()
 
 	ImagePlane &plane = imagePlanes[activePlaneIdx];
 	activeMIP = clampMipIndexForPlane(plane, activeMIP);
+	const int frameActivePlaneIdx = activePlaneIdx;
+	const int frameActiveMIP = activeMIP;
 
 	ImagePlaneData &planeData = plane.MIPs[activeMIP];
 	ImagePlaneData::state planeReady;
@@ -1284,6 +1286,7 @@ void NoPlayer::draw()
 			if (ImGui::Selectable(imagePlanes[n].name.c_str(), activePlaneIdx == n))
 			{
 				activePlaneIdx = n;
+				activeMIP = clampMipIndexForPlane(imagePlanes[activePlaneIdx], activeMIP);
 				channelSoloing = 0;
 			}
 			ImGui::PopID();
@@ -1476,7 +1479,12 @@ void NoPlayer::draw()
 		int waveformSelectionMinY = 0;
 		int waveformSelectionMaxX = 0;
 		int waveformSelectionMaxY = 0;
-		const bool waveformSelectionActive = inspect
+		const bool activeViewChangedThisFrame = activePlaneIdx != frameActivePlaneIdx || activeMIP != frameActiveMIP;
+		if (activeViewChangedThisFrame)
+			waveformPanel.invalidate();
+
+		const bool waveformSelectionActive = !activeViewChangedThisFrame
+			&& inspect
 			&& (inspectRegionActive || (inspectRegionDragging && inspectRegionMoved));
 		if (waveformSelectionActive)
 		{
@@ -1486,7 +1494,8 @@ void NoPlayer::draw()
 		}
 
 		WaveformPanel::SampleOverlayInfo waveformSampleOverlay;
-		if (waveformSplitView
+		if (!activeViewChangedThisFrame
+			&& waveformSplitView
 			&& inspect
 			&& planeReady >= ImagePlaneData::LOADED
 			&& planeData.pixels
@@ -1506,22 +1515,42 @@ void NoPlayer::draw()
 						&& sampleY <= waveformSelectionMaxY);
 				if (mouseInsideWaveformSelection)
 				{
-					const int sampledChannels = std::min(planeData.len, 4);
 					const size_t pixelOffset = (static_cast<size_t>(sampleY) * static_cast<size_t>(planeData.imageWidth)
 											 + static_cast<size_t>(sampleX)) * static_cast<size_t>(planeData.len);
 					const precision* pixels = planeData.pixels.get();
+					const auto waveformInterpretation = ImageChannelUtils::waveformColorInterpretation(planeData.channels, planeData.len);
 
-					waveformSampleOverlay.active = sampledChannels > 0;
-					waveformSampleOverlay.isRgb = ImageChannelUtils::isRgbChannels(planeData.channels) && planeData.len >= 3;
-					waveformSampleOverlay.channelCount = sampledChannels;
+					waveformSampleOverlay.colorInterpretation = waveformInterpretation;
 					waveformSampleOverlay.sourceX = sampleX;
-					for (int channel = 0; channel < sampledChannels; channel++)
-						waveformSampleOverlay.values[channel] = static_cast<float>(pixels[pixelOffset + static_cast<size_t>(channel)]);
+					if (ImageChannelUtils::hasWaveformRgbTriplet(waveformInterpretation))
+					{
+						float red = 0.0f;
+						float green = 0.0f;
+						float blue = 0.0f;
+						if (ImageChannelUtils::sampleWaveformRgbTriplet(pixels + pixelOffset, waveformInterpretation, red, green, blue))
+						{
+							waveformSampleOverlay.active = true;
+							waveformSampleOverlay.channelCount = 3;
+							waveformSampleOverlay.values[0] = red;
+							waveformSampleOverlay.values[1] = green;
+							waveformSampleOverlay.values[2] = blue;
+						}
+					}
+					else
+					{
+						const int sampledChannels = std::min(planeData.len, 4);
+						waveformSampleOverlay.active = sampledChannels > 0;
+						waveformSampleOverlay.channelCount = sampledChannels;
+						for (int channel = 0; channel < sampledChannels; channel++)
+							waveformSampleOverlay.values[channel] = static_cast<float>(pixels[pixelOffset + static_cast<size_t>(channel)]);
+					}
 				}
 			}
 		}
 
-		const bool waveformSourceReady = planeReady >= ImagePlaneData::LOADED;
+		const int waveformPlaneIdx = activePlaneIdx;
+		const int waveformMipIdx = clampMipIndexForPlane(imagePlanes[waveformPlaneIdx], activeMIP);
+		const bool waveformSourceReady = !activeViewChangedThisFrame && planeReady >= ImagePlaneData::LOADED;
 		if (waveformSplitView)
 		{
 			waveformPanel.draw(analysisPanelWidth,
@@ -1530,8 +1559,8 @@ void NoPlayer::draw()
 								waveformSplitterDragging,
 								waveformSourceReady,
 								waveformSourceReady ? &planeData : nullptr,
-								activePlaneIdx,
-								activeMIP,
+								waveformPlaneIdx,
+								waveformMipIdx,
 								queueGeneration,
 								waveformSelectionActive,
 								waveformSelectionMinX,
@@ -1750,7 +1779,8 @@ void NoPlayer::draw()
 			&& planeData.imageWidth > 0
 			&& planeData.imageHeight > 0)
 		{
-			const bool planeIsRgb = ImageChannelUtils::isRgbChannels(planeData.channels) && planeData.len >= 3;
+			const auto waveformInterpretation = ImageChannelUtils::waveformColorInterpretation(planeData.channels, planeData.len);
+			const bool planeHasRgbTriplet = ImageChannelUtils::hasWaveformRgbTriplet(waveformInterpretation);
 			const precision* pixels = planeData.pixels.get();
 			const int sourceX = std::clamp(waveformHover.sourceX, 0, static_cast<int>(planeData.imageWidth) - 1);
 			const int searchMinY = std::clamp(waveformHover.sourceMinY, 0, static_cast<int>(planeData.imageHeight) - 1);
@@ -1764,42 +1794,96 @@ void NoPlayer::draw()
 			{
 				const size_t pixelOffset = (static_cast<size_t>(sampleY) * static_cast<size_t>(planeData.imageWidth)
 										 + static_cast<size_t>(sourceX)) * static_cast<size_t>(planeData.len);
-				if (planeIsRgb && waveformHover.paintMode == WaveformPanel::PaintMode::Rgb)
+				const precision* pixel = pixels + pixelOffset;
+				if (planeHasRgbTriplet && waveformHover.paintMode == WaveformPanel::PaintMode::Rgb)
 				{
-					for (int channel = 0; channel < 3; channel++)
+					if (waveformInterpretation == ImageChannelUtils::WaveformColorInterpretation::Rgb)
 					{
-						foundMatch = updateWaveformMatch(static_cast<float>(pixels[pixelOffset + static_cast<size_t>(channel)]),
-														 waveformHover.minLogValue,
-														 waveformHover.targetLogValue,
-														 sampleY,
-														 channel,
-														 bestDistance,
-														 bestY,
-														 bestChannel) || foundMatch;
+						for (int channel = 0; channel < 3; channel++)
+						{
+							foundMatch = updateWaveformMatch(static_cast<float>(pixel[static_cast<size_t>(channel)]),
+															 waveformHover.minLogValue,
+															 waveformHover.targetLogValue,
+															 sampleY,
+															 channel,
+															 bestDistance,
+															 bestY,
+															 bestChannel) || foundMatch;
+						}
 					}
-				}
-				else if (planeIsRgb)
-				{
-					const int singleChannel = waveformSingleChannelIndex(waveformHover.paintMode);
-					if (singleChannel >= 0 && singleChannel < planeData.len)
+					else if (ImageChannelUtils::isReplicatedWaveformRgb(waveformInterpretation))
 					{
-						foundMatch = updateWaveformMatch(static_cast<float>(pixels[pixelOffset + static_cast<size_t>(singleChannel)]),
-														 waveformHover.minLogValue,
-														 waveformHover.targetLogValue,
-														 sampleY,
-														 singleChannel,
-														 bestDistance,
-														 bestY,
-														 bestChannel) || foundMatch;
+						float value = 0.0f;
+						if (ImageChannelUtils::sampleWaveformRgbChannel(pixel, waveformInterpretation, 0, value))
+						{
+							foundMatch = updateWaveformMatch(value,
+															 waveformHover.minLogValue,
+															 waveformHover.targetLogValue,
+															 sampleY,
+															 -1,
+															 bestDistance,
+															 bestY,
+															 bestChannel) || foundMatch;
+						}
 					}
 					else
 					{
-						const float red = static_cast<float>(pixels[pixelOffset + 0]);
-						const float green = static_cast<float>(pixels[pixelOffset + 1]);
-						const float blue = static_cast<float>(pixels[pixelOffset + 2]);
-						if (std::isfinite(red) && std::isfinite(green) && std::isfinite(blue))
+						float red = 0.0f;
+						float green = 0.0f;
+						float blue = 0.0f;
+						if (ImageChannelUtils::sampleWaveformRgbTriplet(pixel, waveformInterpretation, red, green, blue))
 						{
-							foundMatch = updateWaveformMatch(ImageChannelUtils::computeBt709Luma(red, green, blue),
+							foundMatch = updateWaveformMatch(red,
+															 waveformHover.minLogValue,
+															 waveformHover.targetLogValue,
+															 sampleY,
+															 0,
+															 bestDistance,
+															 bestY,
+															 bestChannel) || foundMatch;
+							foundMatch = updateWaveformMatch(green,
+															 waveformHover.minLogValue,
+															 waveformHover.targetLogValue,
+															 sampleY,
+															 1,
+															 bestDistance,
+															 bestY,
+															 bestChannel) || foundMatch;
+							foundMatch = updateWaveformMatch(blue,
+															 waveformHover.minLogValue,
+															 waveformHover.targetLogValue,
+															 sampleY,
+															 2,
+															 bestDistance,
+															 bestY,
+															 bestChannel) || foundMatch;
+						}
+					}
+				}
+				else if (planeHasRgbTriplet)
+				{
+					const int singleChannel = waveformSingleChannelIndex(waveformHover.paintMode);
+					if (singleChannel >= 0)
+					{
+						float value = 0.0f;
+						if (ImageChannelUtils::sampleWaveformRgbChannel(pixel, waveformInterpretation, singleChannel, value))
+						{
+							foundMatch = updateWaveformMatch(value,
+															 waveformHover.minLogValue,
+															 waveformHover.targetLogValue,
+															 sampleY,
+															 singleChannel,
+															 bestDistance,
+															 bestY,
+															 bestChannel) || foundMatch;
+						}
+					}
+					else
+					{
+						float value = 0.0f;
+						if (ImageChannelUtils::sampleWaveformLuma(pixel, waveformInterpretation, value))
+						{
+							foundMatch = updateWaveformMatch(value,
 															 waveformHover.minLogValue,
 															 waveformHover.targetLogValue,
 															 sampleY,
@@ -1812,7 +1896,7 @@ void NoPlayer::draw()
 				}
 				else
 				{
-					foundMatch = updateWaveformMatch(static_cast<float>(pixels[pixelOffset]),
+					foundMatch = updateWaveformMatch(static_cast<float>(pixel[0]),
 													 waveformHover.minLogValue,
 													 waveformHover.targetLogValue,
 													 sampleY,
