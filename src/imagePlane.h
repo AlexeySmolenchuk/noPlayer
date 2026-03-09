@@ -1,10 +1,11 @@
 #pragma once
 
 #include <GL/glew.h>
-#include <OpenImageIO/imagebuf.h>
 #include <OpenImageIO/imagecache.h>
 #include <OpenImageIO/imageio.h>
 
+#include <array>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -42,7 +43,7 @@ static int internalFormats[] = {0, GL_R16F, GL_RG16F, GL_RGB16F, GL_RGBA16F};
 struct ImagePlaneData
 {
 	/**
-	 * @brief Load pixels into the CPU-side `ImageBuf` and packed pixel array.
+	 * @brief Load pixels into the packed CPU-side upload buffer.
 	 *
 	 * Called by the background loader worker to prepare data for inspection and upload.
 	 *
@@ -68,6 +69,31 @@ struct ImagePlaneData
 	 * @param maximum Output array with one maximum value per channel.
 	 */
 	void getRange(float* minimum, float* maximum);
+
+	/**
+	 * @brief Read one loaded pixel from the packed channel buffer.
+	 *
+	 * @param x Data-window X coordinate.
+	 * @param y Data-window Y coordinate.
+	 * @param values Output channel values.
+	 * @param maxValues Maximum number of channels to copy.
+	 * @return `true` when the sample could be read.
+	 */
+	bool samplePixel(int x, int y, float* values, int maxValues) const;
+
+	/**
+	 * @brief Compute or reuse the cached average for a rectangular selection.
+	 *
+	 * @param minX Data-window min X.
+	 * @param minY Data-window min Y.
+	 * @param maxX Data-window max X.
+	 * @param maxY Data-window max Y.
+	 * @param values Output average values.
+	 * @param maxValues Maximum number of channels to copy.
+	 * @param sampledPixels Output number of averaged pixels.
+	 * @return `true` when the average could be computed.
+	 */
+	bool getSelectionAverage(int minX, int minY, int maxX, int maxY, float* values, int maxValues, int& sampledPixels);
 
 	/** Path to the source image on disk. Used by `load`. */
 	std::string imageFileName;
@@ -117,7 +143,7 @@ struct ImagePlaneData
 	/** Pixel aspect ratio from file metadata. Used in viewport transform math. */
 	float pixelAspect = 1.0f;
 
-	/** First channel index in the original OIIO spec. Used for `ImageBuf` channel fetches. */
+	/** First channel index in the original OIIO spec. Used for channel fetches during load. */
 	int begin = 0;
 	/** Number of channels in this plane. */
 	int len = 0;
@@ -141,11 +167,22 @@ struct ImagePlaneData
 
 	/** Current async state for this plane payload. */
 	state ready = NOT_ISSUED;
-
-	/** OIIO image buffer used for raw measurements and channel fetches in inspector. */
-	OIIO::ImageBuf buffer;
 	/** Shared image cache injected by `NoPlayer` for efficient I/O reuse. */
 	std::shared_ptr<OIIO::ImageCache> cache;
+
+	/** Cached per-channel min/max values for the loaded packed pixel buffer. */
+	bool rangeCacheValid = false;
+	std::array<float, 4> cachedMinimum = {0.0f, 0.0f, 0.0f, 0.0f};
+	std::array<float, 4> cachedMaximum = {0.0f, 0.0f, 0.0f, 0.0f};
+
+	/** Cached region-average result for the inspector selection overlay. */
+	bool selectionAverageValid = false;
+	int selectionAverageMinX = 0;
+	int selectionAverageMinY = 0;
+	int selectionAverageMaxX = 0;
+	int selectionAverageMaxY = 0;
+	int selectionAverageSampledPixels = 0;
+	std::array<float, 4> selectionAverageValues = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
 /**

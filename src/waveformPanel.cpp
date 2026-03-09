@@ -17,9 +17,7 @@ constexpr float SPREAD_DIAGONAL = 0.20f;
 
 float toLogValue(float value, float minLogValue)
 {
-	if (!std::isfinite(value) || value <= EPSILON)
-		return minLogValue;
-	return std::log2(value);
+	return ImageChannelUtils::toLog2OrFloor(value, minLogValue, EPSILON);
 }
 
 float computeIntensity(std::uint32_t count, std::uint32_t maxCount)
@@ -28,12 +26,6 @@ float computeIntensity(std::uint32_t count, std::uint32_t maxCount)
 		return 0.0f;
 	const float normalized = std::log1p(static_cast<float>(count)) / std::log1p(static_cast<float>(maxCount));
 	return std::sqrt(std::clamp(normalized, 0.0f, 1.0f));
-}
-
-float computeYuvLuma(float red, float green, float blue)
-{
-	// Y' only: BT.709 luma from RGB. Chroma (U/V) is intentionally not part of this mode.
-	return 0.2126f * red + 0.7152f * green + 0.0722f * blue;
 }
 
 bool isSingleChannelMode(WaveformPanel::PaintMode mode)
@@ -86,14 +78,22 @@ void colorizeSingleChannel(WaveformPanel::PaintMode mode,
 	}
 }
 
-std::vector<float> buildIntensityMap(const std::vector<std::uint32_t>& histogram,
-									 int width,
-									 int height,
-									 std::uint32_t maxCount)
+template <typename T>
+void resizeAndFill(std::vector<T>& values, size_t size, const T& fillValue)
+{
+	values.assign(size, fillValue);
+}
+
+void buildIntensityMap(const std::vector<std::uint32_t>& histogram,
+					   int width,
+					   int height,
+					   std::uint32_t maxCount,
+					   std::vector<float>& base,
+					   std::vector<float>& spread)
 {
 	const size_t histogramSize = static_cast<size_t>(width) * static_cast<size_t>(height);
-	std::vector<float> base(histogramSize, 0.0f);
-	std::vector<float> spread(histogramSize, 0.0f);
+	resizeAndFill(base, histogramSize, 0.0f);
+	resizeAndFill(spread, histogramSize, 0.0f);
 	for (size_t index = 0; index < histogramSize; index++)
 		base[index] = computeIntensity(histogram[index], maxCount);
 
@@ -127,7 +127,6 @@ std::vector<float> buildIntensityMap(const std::vector<std::uint32_t>& histogram
 		}
 	}
 
-	return spread;
 }
 
 void accumulateTexturePixel(std::vector<unsigned char>& imageData,
@@ -215,6 +214,8 @@ void WaveformPanel::releaseGlResources()
 		glDeleteTextures(1, &texture);
 		texture = 0;
 	}
+	textureWidth = 0;
+	textureHeight = 0;
 }
 
 
@@ -262,7 +263,7 @@ bool WaveformPanel::isValidFor(int planeIdx,
 }
 
 
-WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
+WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task, ScratchBuffers& scratch)
 {
 	BuildResult result;
 	result.isRgb = task.isRgb;
@@ -294,22 +295,28 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 	const int sourceMaxY = task.selectionActive ? std::clamp(task.selectionMaxY, sourceMinY, task.imageHeight - 1) : task.imageHeight - 1;
 	const int sourceWidth = sourceMaxX - sourceMinX + 1;
 
-	std::vector<std::uint32_t> histogramRed(histogramSize, 0u);
-	std::vector<std::uint32_t> histogramGreen(histogramSize, 0u);
-	std::vector<std::uint32_t> histogramBlue(histogramSize, 0u);
-	std::vector<std::uint32_t> histogramWhite(histogramSize, 0u);
-	std::vector<int> xBins(static_cast<size_t>(sourceWidth), 0);
+	if (showRgbChannels)
+	{
+		resizeAndFill(scratch.histogramRed, histogramSize, 0u);
+		resizeAndFill(scratch.histogramGreen, histogramSize, 0u);
+		resizeAndFill(scratch.histogramBlue, histogramSize, 0u);
+	}
+	else
+	{
+		resizeAndFill(scratch.histogramWhite, histogramSize, 0u);
+	}
+	scratch.xBins.resize(static_cast<size_t>(sourceWidth));
 
 	for (int x = 0; x < sourceWidth; x++)
 	{
 		if (scopeWidth <= 1 || sourceWidth <= 1)
 		{
-			xBins[static_cast<size_t>(x)] = 0;
+			scratch.xBins[static_cast<size_t>(x)] = 0;
 			continue;
 		}
 
 		const long long numerator = static_cast<long long>(x) * static_cast<long long>(scopeWidth - 1);
-		xBins[static_cast<size_t>(x)] = static_cast<int>(numerator / static_cast<long long>(sourceWidth - 1));
+		scratch.xBins[static_cast<size_t>(x)] = static_cast<int>(numerator / static_cast<long long>(sourceWidth - 1));
 	}
 
 	const precision* pixels = task.pixels.get();
@@ -342,7 +349,7 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 			}
 			else if (showSingleChannel)
 			{
-				const float value = static_cast<float>(pixels[pixelOffset + static_cast<size_t>(singleChannel)]);
+					const float value = static_cast<float>(pixels[pixelOffset + static_cast<size_t>(singleChannel)]);
 				if (!std::isfinite(value))
 					continue;
 				minValue = std::min(minValue, value);
@@ -363,7 +370,7 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 					const float blue = static_cast<float>(pixels[pixelOffset + 2]);
 					if (!std::isfinite(red) || !std::isfinite(green) || !std::isfinite(blue))
 						continue;
-					value = computeYuvLuma(red, green, blue);
+					value = ImageChannelUtils::computeBt709Luma(red, green, blue);
 				}
 
 				if (!std::isfinite(value))
@@ -430,23 +437,23 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 					const float normalized = std::clamp((toLogValue(value, minLogValue) - minLogValue) / logValueRange, 0.0f, 1.0f);
 					const int binY = std::clamp(static_cast<int>(std::round(normalized * static_cast<float>(lastScopeRow))),
 												0, lastScopeRow);
-						const int binX = xBins[static_cast<size_t>(localX)];
+						const int binX = scratch.xBins[static_cast<size_t>(localX)];
 					const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(binX);
 
 					if (channel == 0)
 					{
-						histogramRed[index]++;
-						maxCountRed = std::max(maxCountRed, histogramRed[index]);
+						scratch.histogramRed[index]++;
+						maxCountRed = std::max(maxCountRed, scratch.histogramRed[index]);
 					}
 					else if (channel == 1)
 					{
-						histogramGreen[index]++;
-						maxCountGreen = std::max(maxCountGreen, histogramGreen[index]);
+						scratch.histogramGreen[index]++;
+						maxCountGreen = std::max(maxCountGreen, scratch.histogramGreen[index]);
 					}
 					else
 					{
-						histogramBlue[index]++;
-						maxCountBlue = std::max(maxCountBlue, histogramBlue[index]);
+						scratch.histogramBlue[index]++;
+						maxCountBlue = std::max(maxCountBlue, scratch.histogramBlue[index]);
 					}
 				}
 			}
@@ -459,10 +466,10 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 				const float normalized = std::clamp((toLogValue(value, minLogValue) - minLogValue) / logValueRange, 0.0f, 1.0f);
 				const int binY = std::clamp(static_cast<int>(std::round(normalized * static_cast<float>(lastScopeRow))),
 											0, lastScopeRow);
-					const int binX = xBins[static_cast<size_t>(localX)];
+					const int binX = scratch.xBins[static_cast<size_t>(localX)];
 				const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(binX);
-				histogramWhite[index]++;
-				maxCountWhite = std::max(maxCountWhite, histogramWhite[index]);
+				scratch.histogramWhite[index]++;
+				maxCountWhite = std::max(maxCountWhite, scratch.histogramWhite[index]);
 			}
 			else
 			{
@@ -474,7 +481,7 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 					const float blue = static_cast<float>(pixels[pixelOffset + 2]);
 					if (!std::isfinite(red) || !std::isfinite(green) || !std::isfinite(blue))
 						continue;
-					value = computeYuvLuma(red, green, blue);
+					value = ImageChannelUtils::computeBt709Luma(red, green, blue);
 				}
 
 				if (!std::isfinite(value))
@@ -483,26 +490,24 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 				const float normalized = std::clamp((toLogValue(value, minLogValue) - minLogValue) / logValueRange, 0.0f, 1.0f);
 				const int binY = std::clamp(static_cast<int>(std::round(normalized * static_cast<float>(lastScopeRow))),
 											0, lastScopeRow);
-					const int binX = xBins[static_cast<size_t>(localX)];
+					const int binX = scratch.xBins[static_cast<size_t>(localX)];
 				const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(binX);
-				histogramWhite[index]++;
-				maxCountWhite = std::max(maxCountWhite, histogramWhite[index]);
+				scratch.histogramWhite[index]++;
+				maxCountWhite = std::max(maxCountWhite, scratch.histogramWhite[index]);
 			}
 		}
 	}
 
-	const std::vector<float> intensityRed = showRgbChannels
-		? buildIntensityMap(histogramRed, scopeWidth, scopeHeight, maxCountRed)
-		: std::vector<float>();
-	const std::vector<float> intensityGreen = showRgbChannels
-		? buildIntensityMap(histogramGreen, scopeWidth, scopeHeight, maxCountGreen)
-		: std::vector<float>();
-	const std::vector<float> intensityBlue = showRgbChannels
-		? buildIntensityMap(histogramBlue, scopeWidth, scopeHeight, maxCountBlue)
-		: std::vector<float>();
-		const std::vector<float> intensityWhite = !showRgbChannels
-		? buildIntensityMap(histogramWhite, scopeWidth, scopeHeight, maxCountWhite)
-		: std::vector<float>();
+	if (showRgbChannels)
+	{
+		buildIntensityMap(scratch.histogramRed, scopeWidth, scopeHeight, maxCountRed, scratch.tempBase, scratch.intensityRed);
+		buildIntensityMap(scratch.histogramGreen, scopeWidth, scopeHeight, maxCountGreen, scratch.tempBase, scratch.intensityGreen);
+		buildIntensityMap(scratch.histogramBlue, scopeWidth, scopeHeight, maxCountBlue, scratch.tempBase, scratch.intensityBlue);
+	}
+	else
+	{
+		buildIntensityMap(scratch.histogramWhite, scopeWidth, scopeHeight, maxCountWhite, scratch.tempBase, scratch.intensityWhite);
+	}
 
 	result.imageData.assign(histogramSize * 4ull, 0u);
 	for (int binY = 0; binY < scopeHeight; binY++)
@@ -513,15 +518,15 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 			const size_t index = static_cast<size_t>(binY) * static_cast<size_t>(scopeWidth) + static_cast<size_t>(x);
 			if (showRgbChannels)
 			{
-				const float red = intensityRed[index];
-				const float green = intensityGreen[index];
-				const float blue = intensityBlue[index];
+				const float red = scratch.intensityRed[index];
+				const float green = scratch.intensityGreen[index];
+				const float blue = scratch.intensityBlue[index];
 				const float alpha = std::clamp(std::max({red, green, blue}), 0.0f, 1.0f);
 				accumulateTexturePixel(result.imageData, scopeWidth, x, texY, red, green, blue, alpha);
 			}
 			else if (showSingleChannel)
 			{
-				const float mono = intensityWhite[index];
+				const float mono = scratch.intensityWhite[index];
 				float red = 0.0f;
 				float green = 0.0f;
 				float blue = 0.0f;
@@ -530,7 +535,7 @@ WaveformPanel::BuildResult WaveformPanel::buildWaveform(const BuildTask& task)
 			}
 			else
 			{
-				const float mono = intensityWhite[index];
+				const float mono = scratch.intensityWhite[index];
 				accumulateTexturePixel(result.imageData, scopeWidth, x, texY, mono, mono, mono, mono);
 			}
 		}
@@ -563,7 +568,7 @@ void WaveformPanel::workerLoop()
 			hasPendingTask = false;
 		}
 
-		BuildResult result = buildWaveform(task);
+		BuildResult result = buildWaveform(task, workerScratch);
 
 		std::lock_guard<std::mutex> lock(workerMutex);
 		if (workerStop)
@@ -629,7 +634,7 @@ void WaveformPanel::requestBuild(const ImagePlaneData& planeData,
 	task.imageWidth = static_cast<int>(planeData.imageWidth);
 	task.imageHeight = static_cast<int>(planeData.imageHeight);
 	task.channelCount = planeData.len;
-	task.isRgb = isRgbChannels(planeData.channels) && planeData.len >= 3;
+	task.isRgb = ImageChannelUtils::isRgbChannels(planeData.channels) && planeData.len >= 3;
 	task.selectionActive = selectionActive;
 	task.selectionMinX = selectionMinX;
 	task.selectionMinY = selectionMinY;
@@ -713,22 +718,45 @@ void WaveformPanel::consumeReadyResult()
 		return;
 
 	if (texture == 0)
+	{
 		glGenTextures(1, &texture);
-	glBindTexture(GL_TEXTURE_2D, texture);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glBindTexture(GL_TEXTURE_2D, texture);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	}
+	else
+	{
+		glBindTexture(GL_TEXTURE_2D, texture);
+	}
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	glTexImage2D(GL_TEXTURE_2D,
-				0,
-				GL_RGBA8,
-				result.plotWidth,
-				result.plotHeight,
-				0,
-				GL_RGBA,
-				GL_UNSIGNED_BYTE,
-				result.imageData.data());
+	if (textureWidth == result.plotWidth && textureHeight == result.plotHeight)
+	{
+		glTexSubImage2D(GL_TEXTURE_2D,
+						0,
+						0,
+						0,
+						result.plotWidth,
+						result.plotHeight,
+						GL_RGBA,
+						GL_UNSIGNED_BYTE,
+						result.imageData.data());
+	}
+	else
+	{
+		glTexImage2D(GL_TEXTURE_2D,
+					0,
+					GL_RGBA8,
+					result.plotWidth,
+					result.plotHeight,
+					0,
+					GL_RGBA,
+					GL_UNSIGNED_BYTE,
+					result.imageData.data());
+		textureWidth = result.plotWidth;
+		textureHeight = result.plotHeight;
+	}
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	valid = true;
@@ -947,7 +975,7 @@ void WaveformPanel::draw(int panelWidth,
 			}
 			else if (sampleOverlayInfo->isRgb && sampleOverlayInfo->channelCount >= 3)
 			{
-				float value = computeYuvLuma(sampleOverlayInfo->values[0], sampleOverlayInfo->values[1], sampleOverlayInfo->values[2]);
+				float value = ImageChannelUtils::computeBt709Luma(sampleOverlayInfo->values[0], sampleOverlayInfo->values[1], sampleOverlayInfo->values[2]);
 				if (cachedPaintMode == PaintMode::Red)
 					value = sampleOverlayInfo->values[0];
 				else if (cachedPaintMode == PaintMode::Green)
@@ -1007,20 +1035,4 @@ const char* WaveformPanel::paintModeLabel(PaintMode mode)
 		return "B";
 	}
 	return "Luminance - YUV";
-}
-
-
-bool WaveformPanel::isRgbChannels(const std::string& channels)
-{
-	if (channels.size() < 3)
-		return false;
-
-	auto isChannel = [](char value, char expected)
-	{
-		return value == expected || value == static_cast<char>(expected - 'a' + 'A');
-	};
-
-	return isChannel(channels[0], 'r')
-		&& isChannel(channels[1], 'g')
-		&& isChannel(channels[2], 'b');
 }

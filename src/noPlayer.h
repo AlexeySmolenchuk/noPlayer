@@ -1,6 +1,7 @@
 #pragma once
 
 #include "imagePlane.h"
+#include "shaderUniforms.h"
 #include "waveformPanel.h"
 
 #include <GL/glew.h>
@@ -74,6 +75,13 @@ public:
 	 * Called from `run` and framebuffer callback.
 	 */
 	void draw();
+
+	/**
+	 * @brief Refresh ImGui font scale from the current monitor content scale.
+	 *
+	 * Called during startup and window-move/resize callbacks.
+	 */
+	void updateFontScale();
 
 	/**
 	 * @brief Set active channel-solo mode.
@@ -233,6 +241,10 @@ private:
 	GLuint shader = 0;
 	/** Frame-outline shader program. */
 	GLuint frameShader = 0;
+	/** Cached uniform locations for the image program. */
+	ImageShaderUniforms shaderUniforms;
+	/** Cached uniform locations for the frame program. */
+	FrameShaderUniforms frameShaderUniforms;
 
 	/** Base zoom scale value. */
 	float scale = 1.0f;

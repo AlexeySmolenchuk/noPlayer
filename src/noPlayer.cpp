@@ -1,9 +1,12 @@
 #include "noPlayer.h"
+#include "imageChannelUtils.h"
+
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <OpenImageIO/imageio.h>
 #include <OpenEXR/OpenEXRConfig.h>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 
@@ -44,24 +47,6 @@ void releasePlaneTextures(std::vector<ImagePlane>& planes)
 	}
 }
 
-bool isRgbChannels(const std::string& channels)
-{
-	// Treat both lower and upper case channel labels as RGB.
-	if (channels.size() < 3)
-		return false;
-
-	auto isChannel = [](char value, char expected)
-	{
-		return value == expected || value == static_cast<char>(expected - 'a' + 'A');
-	};
-
-	return isChannel(channels[0], 'r')
-		&& isChannel(channels[1], 'g')
-		&& isChannel(channels[2], 'b');
-}
-
-float computeWaveformYuvLuma(float red, float green, float blue);
-
 bool isDerivedSolo(int mode)
 {
 	return mode >= SOLO_H && mode <= SOLO_Y;
@@ -76,7 +61,7 @@ bool canRenderSoloMode(int mode, const ImagePlaneData& plane)
 	if (mode >= SOLO_R && mode <= SOLO_B)
 		return mode <= plane.len;
 
-	if (isDerivedSolo(mode) && plane.len >= 3 && isRgbChannels(plane.channels))
+	if (isDerivedSolo(mode) && plane.len >= 3 && ImageChannelUtils::isRgbChannels(plane.channels))
 		return true;
 
 	if (mode == SOLO_A && plane.len >= 4)
@@ -104,7 +89,7 @@ void rgbToHsvy(float r, float g, float b, float& h, float& s, float& v, float& y
 	const float delta = cmax - cmin;
 
 	v = cmax;
-	y = computeWaveformYuvLuma(r, g, b);
+	y = ImageChannelUtils::computeBt709Luma(r, g, b);
 	h = 0.0f;
 	s = 0.0f;
 
@@ -196,16 +181,9 @@ void getImageSelectionBounds(const ImVec2& start, const ImVec2& end, const Image
 	maxY = std::max(maxY, minY);
 }
 
-float computeWaveformYuvLuma(float red, float green, float blue)
-{
-	return 0.2126f * red + 0.7152f * green + 0.0722f * blue;
-}
-
 float toWaveformLogValue(float value, float minLogValue)
 {
-	if (!std::isfinite(value) || value <= WAVEFORM_LOG_EPSILON)
-		return minLogValue;
-	return std::log2(value);
+	return ImageChannelUtils::toLog2OrFloor(value, minLogValue, WAVEFORM_LOG_EPSILON);
 }
 
 int waveformSingleChannelIndex(WaveformPanel::PaintMode mode)
@@ -259,7 +237,17 @@ void framebufferSizeCallback(GLFWwindow* window, int width, int height)
 {
 	// Trigger redraw when framebuffer size changes.
 	NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(window));
+	view->updateFontScale();
 	view->draw();
+}
+
+
+void windowPosCallback(GLFWwindow* window, int x, int y)
+{
+	(void)x;
+	(void)y;
+	NoPlayer *view = static_cast<NoPlayer*>(glfwGetWindowUserPointer(window));
+	view->updateFontScale();
 }
 
 
@@ -383,6 +371,7 @@ NoPlayer::NoPlayer()
 	// Wire GLFW callbacks to the NoPlayer instance.
 	glfwSetWindowUserPointer(mainWindow, this);
 	glfwSetFramebufferSizeCallback(mainWindow, framebufferSizeCallback);
+	glfwSetWindowPosCallback(mainWindow, windowPosCallback);
 	glfwSetKeyCallback(mainWindow, keyCallback);
 	glfwSetDropCallback(mainWindow, dropCallback);
 
@@ -412,6 +401,7 @@ NoPlayer::NoPlayer()
 
 	ImGui_ImplGlfw_InitForOpenGL(mainWindow, true);
 	ImGui_ImplOpenGL3_Init("#version 330");
+	updateFontScale();
 
 	// Build rendering resources and OCIO shader source.
 	configureOCIO();
@@ -428,6 +418,17 @@ NoPlayer::NoPlayer()
 	// Start background loading worker.
 	loaderThread = std::thread(&NoPlayer::loader, this);
 };
+
+
+void NoPlayer::updateFontScale()
+{
+	if (mainWindow == nullptr)
+		return;
+
+	GLFWmonitor* monitor = getCurrentMonitor(mainWindow);
+	if (monitor)
+		ImGui::GetIO().FontGlobalScale = ImGui_ImplGlfw_GetContentScaleForMonitor(monitor);
+}
 
 
 void
@@ -641,13 +642,14 @@ void NoPlayer::run()
 	// Poll events, draw frames, and keep preload queues moving.
 	while (!glfwWindowShouldClose(mainWindow))
 	{
+		glfwPollEvents();
 		if (glfwGetWindowAttrib(mainWindow, GLFW_VISIBLE))
 		{
-			GLFWmonitor* monitor = getCurrentMonitor(mainWindow);
-			if (monitor)
-				ImGui::GetIO().FontGlobalScale = ImGui_ImplGlfw_GetContentScaleForMonitor(monitor);
-			glfwPollEvents();
 			draw();
+		}
+		else
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(16));
 		}
 
 		if (imagePlanes.size())
@@ -1040,7 +1042,7 @@ void NoPlayer::draw()
 					min_value = pixel_min[channelSoloing-1];
 					max_value = pixel_max[channelSoloing-1];
 				}
-				else if (isDerivedSolo(channelSoloing) && planeData.len >= 3 && isRgbChannels(plane.channels) && planeData.pixels)
+				else if (isDerivedSolo(channelSoloing) && planeData.len >= 3 && ImageChannelUtils::isRgbChannels(plane.channels) && planeData.pixels)
 				{
 					const precision* pixels = planeData.pixels.get();
 					for (unsigned int y = 0; y < planeData.imageHeight; y++)
@@ -1301,7 +1303,7 @@ void NoPlayer::draw()
 				{
 					ImGui::Text(plane.channels.c_str());
 				}
-				else if (isDerivedSolo(channelSoloing) && planeData.len >= 3 && isRgbChannels(plane.channels))
+				else if (isDerivedSolo(channelSoloing) && planeData.len >= 3 && ImageChannelUtils::isRgbChannels(plane.channels))
 				{
 					const char* derived = "HSVY";
 					for (int i = 0; i < 4; i++)
@@ -1507,7 +1509,7 @@ void NoPlayer::draw()
 					const precision* pixels = planeData.pixels.get();
 
 					waveformSampleOverlay.active = sampledChannels > 0;
-					waveformSampleOverlay.isRgb = isRgbChannels(planeData.channels) && planeData.len >= 3;
+					waveformSampleOverlay.isRgb = ImageChannelUtils::isRgbChannels(planeData.channels) && planeData.len >= 3;
 					waveformSampleOverlay.channelCount = sampledChannels;
 					waveformSampleOverlay.sourceX = sampleX;
 					for (int channel = 0; channel < sampledChannels; channel++)
@@ -1665,42 +1667,23 @@ void NoPlayer::draw()
 
 				if (inspectRegionActive)
 				{
-					const int selectedWidth = selectionMaxX - selectionMinX + 1;
-					const int selectedHeight = selectionMaxY - selectionMinY + 1;
-					sampledPixels = selectedWidth * selectedHeight;
-					double channelSums[4] = {0.0, 0.0, 0.0, 0.0};
-
-					for (int sampleY = selectionMinY; sampleY <= selectionMaxY; sampleY++)
+					if (planeData.getSelectionAverage(selectionMinX, selectionMinY, selectionMaxX, selectionMaxY,
+													  channelValues, inspectedChannels, sampledPixels))
 					{
-						const int bufferY = sampleY + planeData.imageOffsetY;
-						for (int sampleX = selectionMinX; sampleX <= selectionMaxX; sampleX++)
-						{
-							const int bufferX = sampleX + planeData.imageOffsetX;
-							for (int i = 0; i < inspectedChannels; i++)
-								channelSums[i] += planeData.buffer.getchannel(bufferX, bufferY, 0, planeData.begin + i);
-						}
+						ImGui::Text("Average over %d px", sampledPixels);
 					}
-
-					if (sampledPixels > 0)
-					{
-						for (int i = 0; i < inspectedChannels; i++)
-							channelValues[i] = static_cast<float>(channelSums[i] / sampledPixels);
-					}
-
-					ImGui::Text("Average over %d px", sampledPixels);
 				}
 				else if (cursorInsideImage)
 				{
-					const int x = static_cast<int>(coords.x + planeData.imageOffsetX);
-					const int y = static_cast<int>(coords.y + planeData.imageOffsetY);
-					sampledPixels = 1;
-					for (int i = 0; i < inspectedChannels; i++)
-						channelValues[i] = planeData.buffer.getchannel(x, y, 0, planeData.begin + i);
+					const int x = std::clamp(static_cast<int>(std::floor(coords.x)), 0, static_cast<int>(planeData.imageWidth) - 1);
+					const int y = std::clamp(static_cast<int>(std::floor(coords.y)), 0, static_cast<int>(planeData.imageHeight) - 1);
+					if (planeData.samplePixel(x, y, channelValues, inspectedChannels))
+						sampledPixels = 1;
 				}
 
 				if (sampledPixels > 0)
 				{
-					if (inspectedChannels >= 3 && isRgbChannels(planeData.channels))
+					if (inspectedChannels >= 3 && ImageChannelUtils::isRgbChannels(planeData.channels))
 					{
 						float hue, saturation, value, luminance;
 						rgbToHsvy(channelValues[0], channelValues[1], channelValues[2], hue, saturation, value, luminance);
@@ -1758,7 +1741,7 @@ void NoPlayer::draw()
 			&& planeData.imageWidth > 0
 			&& planeData.imageHeight > 0)
 		{
-			const bool planeIsRgb = isRgbChannels(planeData.channels) && planeData.len >= 3;
+			const bool planeIsRgb = ImageChannelUtils::isRgbChannels(planeData.channels) && planeData.len >= 3;
 			const precision* pixels = planeData.pixels.get();
 			const int sourceX = std::clamp(waveformHover.sourceX, 0, static_cast<int>(planeData.imageWidth) - 1);
 			const int searchMinY = std::clamp(waveformHover.sourceMinY, 0, static_cast<int>(planeData.imageHeight) - 1);
@@ -1807,7 +1790,7 @@ void NoPlayer::draw()
 						const float blue = static_cast<float>(pixels[pixelOffset + 2]);
 						if (std::isfinite(red) && std::isfinite(green) && std::isfinite(blue))
 						{
-							foundMatch = updateWaveformMatch(computeWaveformYuvLuma(red, green, blue),
+							foundMatch = updateWaveformMatch(ImageChannelUtils::computeBt709Luma(red, green, blue),
 															 waveformHover.minLogValue,
 															 waveformHover.targetLogValue,
 															 sampleY,
@@ -1882,24 +1865,24 @@ void NoPlayer::draw()
 		// Push per-frame uniforms and draw image texture.
 		glUseProgram(shader);
 
-		glUniform2f(glGetUniformLocation(shader, "offset"),  (offsetX - shift.x + centerX * scale * factor * compensateMIP)/(float)imageViewportW,
-															-(offsetY - shift.y + centerY * scale * factor * compensateMIP)/(float)imageViewportH);
-		glUniform2f(glGetUniformLocation(shader, "scale"),  scale * factor * compensateMIP * planeData.imageWidth/(float)imageViewportW * planeData.pixelAspect,
-															scale * factor * compensateMIP * planeData.imageHeight/(float)imageViewportH);
+		glUniform2f(shaderUniforms.offset, (offsetX - shift.x + centerX * scale * factor * compensateMIP) / (float)imageViewportW,
+										-(offsetY - shift.y + centerY * scale * factor * compensateMIP) / (float)imageViewportH);
+		glUniform2f(shaderUniforms.scale, scale * factor * compensateMIP * planeData.imageWidth / (float)imageViewportW * planeData.pixelAspect,
+									   scale * factor * compensateMIP * planeData.imageHeight / (float)imageViewportH);
 
-		glUniform1f(glGetUniformLocation(shader, "gainValues"), plane.gainValues);
-		glUniform1f(glGetUniformLocation(shader, "offsetValues"), plane.offsetValues);
-		glUniform1i(glGetUniformLocation(shader, "soloing"), channelSoloing);
-		glUniform1i(glGetUniformLocation(shader, "nchannels"), planeData.len);
-		glUniform1i(glGetUniformLocation(shader, "doOCIO"), plane.doOCIO);
-		glUniform1i(glGetUniformLocation(shader, "checkNaN"), plane.checkNaN);
+		glUniform1f(shaderUniforms.gainValues, plane.gainValues);
+		glUniform1f(shaderUniforms.offsetValues, plane.offsetValues);
+		glUniform1i(shaderUniforms.soloing, channelSoloing);
+		glUniform1i(shaderUniforms.nchannels, planeData.len);
+		glUniform1i(shaderUniforms.doOCIO, plane.doOCIO);
+		glUniform1i(shaderUniforms.checkNaN, plane.checkNaN);
 
 		static float flash = 0;
 		flash += 1.0f/100;
 		if (flash>1.0)
 			flash = 0;
 
-		glUniform1f(glGetUniformLocation(shader, "flash"), flash);
+		glUniform1f(shaderUniforms.flash, flash);
 
 		glDisable(GL_BLEND);
 		glDisable(GL_DEPTH_TEST);
@@ -1917,10 +1900,10 @@ void NoPlayer::draw()
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 		glUseProgram(frameShader);
-		glUniform2f(glGetUniformLocation(frameShader, "offset"), (offsetX - shift.x)/(float)imageViewportW,
-																-(offsetY - shift.y)/(float)imageViewportH);
-		glUniform2f(glGetUniformLocation(frameShader, "scale"), scale * factor * compensateMIP * planeData.windowWidth/(float)imageViewportW * planeData.pixelAspect,
-																scale * factor * compensateMIP * planeData.windowHeight/(float)imageViewportH);
+		glUniform2f(frameShaderUniforms.offset, (offsetX - shift.x)/(float)imageViewportW,
+											-(offsetY - shift.y)/(float)imageViewportH);
+		glUniform2f(frameShaderUniforms.scale, scale * factor * compensateMIP * planeData.windowWidth/(float)imageViewportW * planeData.pixelAspect,
+										   scale * factor * compensateMIP * planeData.windowHeight/(float)imageViewportH);
 		glBindVertexArray(VAO);
 		glDrawArrays(GL_LINE_LOOP, 0, 4);
 		glBindVertexArray(0);

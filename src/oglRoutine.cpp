@@ -68,11 +68,13 @@ void NoPlayer::createShaders()
 		glDeleteProgram(shader);
 		shader = 0;
 	}
+	shaderUniforms = ImageShaderUniforms();
 	if (frameShader != 0)
 	{
 		glDeleteProgram(frameShader);
 		frameShader = 0;
 	}
+	frameShaderUniforms = FrameShaderUniforms();
 
 	// Build the main image program with OCIO-aware fragment code.
 	shader = glCreateProgram();
@@ -96,11 +98,12 @@ void NoPlayer::createShaders()
 		std::cout << "Error linking program:\n" << log << '\n';
 		return;
 	}
+	shaderUniforms.cache(shader);
 
 	glUseProgram(shader);
 	{
 		// Bind the image sampler to texture unit 0.
-		GLint location = glGetUniformLocation(shader, "textureSampler");
+		GLint location = shaderUniforms.textureSampler;
 		if (location >= 0)
 			glUniform1i(location, 0);
 
@@ -143,6 +146,7 @@ void NoPlayer::createShaders()
 		std::cout << "Error linking program:\n" << log << '\n';
 		return;
 	}
+	frameShaderUniforms.cache(frameShader);
 
 	glValidateProgram(frameShader);
 	glGetProgramiv(frameShader, GL_VALIDATE_STATUS, &result);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "imageChannelUtils.h"
 #include "imagePlane.h"
 
 #include <cstdint>
@@ -130,9 +131,22 @@ private:
 		std::uint64_t serial = 0;
 	};
 
-	static bool isRgbChannels(const std::string& channels);
+	struct ScratchBuffers
+	{
+		std::vector<std::uint32_t> histogramRed;
+		std::vector<std::uint32_t> histogramGreen;
+		std::vector<std::uint32_t> histogramBlue;
+		std::vector<std::uint32_t> histogramWhite;
+		std::vector<float> intensityRed;
+		std::vector<float> intensityGreen;
+		std::vector<float> intensityBlue;
+		std::vector<float> intensityWhite;
+		std::vector<float> tempBase;
+		std::vector<int> xBins;
+	};
+
 	static const char* paintModeLabel(PaintMode mode);
-	static BuildResult buildWaveform(const BuildTask& task);
+	static BuildResult buildWaveform(const BuildTask& task, ScratchBuffers& scratch);
 
 	void workerLoop();
 	void requestBuild(const ImagePlaneData& planeData,
@@ -181,6 +195,9 @@ private:
 	HoverInfo hoverInfo;
 
 	GLuint texture = 0;
+	int textureWidth = 0;
+	int textureHeight = 0;
+	ScratchBuffers workerScratch;
 
 	std::mutex workerMutex;
 	std::condition_variable workerCondition;
