@@ -2,15 +2,10 @@
 #include "imagePlane.h"
 #include <OpenImageIO/imagebuf.h>
 #include <OpenImageIO/imagebufalgo.h>
-#include <float.h>
+#include <limits>
 
-void ImagePlaneData::load()
+bool ImagePlaneData::load()
 {
-	if (ready != ISSUED)
-		return;
-
-	ready = LOADING_STARTED;
-
 	using namespace OIIO;
 
 	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };
@@ -21,7 +16,7 @@ void ImagePlaneData::load()
 	{
 		std::cerr << "Could not open " << imageFileName
 				<< ", error = " << OIIO::geterror() << "\n";
-		return;
+		return false;
 	}
 
 	pixels = std::shared_ptr<precision[]>(new precision[imageWidth * imageHeight * len]);
@@ -65,7 +60,7 @@ void ImagePlaneData::load()
 	// 	return;
 	// }
 
-	ready = LOADED;
+	return ok;
 }
 
 
@@ -89,32 +84,92 @@ void ImagePlaneData::getRange(float *minimum, float *maximum)
 {
 	for (int i = 0; i < len; i++)
 	{
-		minimum[i] = FLT_MAX;
-		maximum[i] = FLT_MIN;
+		minimum[i] = std::numeric_limits<float>::max();
+		maximum[i] = std::numeric_limits<float>::lowest();
 	}
 
 	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };
 	OIIO::attribute ("missingcolor", OIIO::TypeDesc("float[4]"), &missing);
 
-    if (buffer.spec().format == OIIO::TypeDesc::FLOAT)
-        getRange_impl<float> (this, minimum, maximum);
-    else if (buffer.spec().format == OIIO::TypeDesc::HALF)
-        getRange_impl<half> (this, minimum, maximum);
-    else if (buffer.spec().format == OIIO::TypeDesc::UINT8)
-        getRange_impl<unsigned char> (this, minimum, maximum);
-    else if (buffer.spec().format == OIIO::TypeDesc::UINT16)
-        getRange_impl<unsigned short> (this, minimum, maximum);
-
+	if (buffer.spec().format == OIIO::TypeDesc::FLOAT)
+		getRange_impl<float> (this, minimum, maximum);
+	else if (buffer.spec().format == OIIO::TypeDesc::HALF)
+		getRange_impl<half> (this, minimum, maximum);
+	else if (buffer.spec().format == OIIO::TypeDesc::UINT8)
+		getRange_impl<unsigned char> (this, minimum, maximum);
+	else if (buffer.spec().format == OIIO::TypeDesc::UINT16)
+		getRange_impl<unsigned short> (this, minimum, maximum);
 }
 
 
-void ImagePlaneData::generateGlTexture()
+template<typename BUFT>
+static void getAverage_impl(ImagePlaneData *plane, const int (&coords)[4])
 {
-	if (ready != LOADED)
-		return;
+	plane->pixelAverage[0] = 0;
+	plane->pixelAverage[1] = 0;
+	plane->pixelAverage[2] = 0;
+	plane->pixelAverage[3] = 0;
+
+	OIIO::ROI roi = plane->buffer.roi();
+
+	roi.xbegin = coords[0];
+	roi.ybegin = coords[1];
+	roi.xend   = coords[2];
+	roi.yend   = coords[3];
+
+	// Iterate over all pixels in the region...
+	for (OIIO::ImageBuf::ConstIterator<BUFT> it(plane->buffer, roi); !it.done(); ++it)
+	{
+		if (! it.exists())   // Make sure the iterator is pointing
+			continue;        //   to a pixel in the data window
+
+		int i = 0;
+		for (int c = plane->begin; c < plane->begin+plane->len;  ++c)
+		{
+			plane->pixelAverage[i] += float(it[c]);
+			i++;
+		}
+	}
+
+	int i = 0;
+	for (int c = plane->begin; c < plane->begin+plane->len;  ++c)
+	{
+		plane->pixelAverage[i] /= float(roi.npixels());
+		i++;
+	}
+}
+
+
+void ImagePlaneData::getAverage(const int (&coords)[4])
+{
+	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };
+	OIIO::attribute ("missingcolor", OIIO::TypeDesc("float[4]"), &missing);
+
+	if (buffer.spec().format == OIIO::TypeDesc::FLOAT)
+		getAverage_impl<float> (this, coords);
+	else if (buffer.spec().format == OIIO::TypeDesc::HALF)
+		getAverage_impl<half> (this, coords);
+	else if (buffer.spec().format == OIIO::TypeDesc::UINT8)
+		getAverage_impl<unsigned char> (this, coords);
+	else if (buffer.spec().format == OIIO::TypeDesc::UINT16)
+		getAverage_impl<unsigned short> (this, coords);
+
+	averageIsValid = true;
+}
+
+
+bool ImagePlaneData::generateGlTexture()
+{
+	if (len < 1 || len > 4 || pixels == nullptr)
+	{
+		return false;
+	}
 
 	glPixelStorei(GL_PACK_ALIGNMENT, 2);
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
+
+	if (glTexture != 0)
+		glDeleteTextures(1, &glTexture);
 
 	// Create an OpenGL texture identifier
 	glGenTextures(1, &glTexture);
@@ -136,5 +191,5 @@ void ImagePlaneData::generateGlTexture()
 					&pixels[0]);
 
 	// std::cout << glGetError() << std::endl;	
-	ready = TEXTURE_GENERATED;
+	return true;
 }

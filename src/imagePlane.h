@@ -25,9 +25,10 @@
 // Represent image data and properties of certain level of MIP
 struct ImagePlaneData
 {
-	void load();
-	void generateGlTexture();
+	bool load();
+	bool generateGlTexture();
 	void getRange(float*, float*);
+	void getAverage(const int (&bb)[4]);
 
 	std::string imageFileName;
 	unsigned int subimage;	// index for async loading
@@ -61,21 +62,24 @@ struct ImagePlaneData
 	int begin; // index in oiio spec
 	int len;
 	std::shared_ptr<precision[]> pixels;	// fill deferred
-	GLuint glTexture;	// fill deferred
+	GLuint glTexture = 0;	// fill deferred
 
 	enum state
 	{
-		NOT_ISSUED,
-		ISSUED,
-		LOADING_STARTED,
-		LOADED,
-		TEXTURE_GENERATED,
+		NOT_ISSUED,       ///< Plane has not been scheduled for load.
+		ISSUED,           ///< Plane has been queued for background loading.
+		LOADING_STARTED,  ///< Worker thread started reading pixel data.
+		LOADED,           ///< Pixel data is available in CPU memory.
+		TEXTURE_GENERATED, ///< OpenGL texture has been created and filled.
 	};
 
 	state ready = NOT_ISSUED;
 
 	OIIO::ImageBuf buffer;
 	std::shared_ptr<OIIO::ImageCache> cache;
+
+	bool averageIsValid = false;
+	float pixelAverage[4] = {0};
 };
 
 

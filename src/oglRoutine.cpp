@@ -47,10 +47,12 @@ void NoPlayer::addShader(GLuint program, const char* shader_code, GLenum type)
 	{
 		glGetShaderInfoLog(current_shader, sizeof(log), NULL, log);
 		std::cout << "Error compiling " << type << " shader: " << log << "\n";
+		glDeleteShader(current_shader);
 		return;
 	}
 
 	glAttachShader(program, current_shader);
+	glDeleteShader(current_shader);
 }
 
 
