@@ -91,15 +91,70 @@ void ImagePlaneData::getRange(float *minimum, float *maximum)
 	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };
 	OIIO::attribute ("missingcolor", OIIO::TypeDesc("float[4]"), &missing);
 
-    if (buffer.spec().format == OIIO::TypeDesc::FLOAT)
-        getRange_impl<float> (this, minimum, maximum);
-    else if (buffer.spec().format == OIIO::TypeDesc::HALF)
-        getRange_impl<half> (this, minimum, maximum);
-    else if (buffer.spec().format == OIIO::TypeDesc::UINT8)
-        getRange_impl<unsigned char> (this, minimum, maximum);
-    else if (buffer.spec().format == OIIO::TypeDesc::UINT16)
-        getRange_impl<unsigned short> (this, minimum, maximum);
+	if (buffer.spec().format == OIIO::TypeDesc::FLOAT)
+		getRange_impl<float> (this, minimum, maximum);
+	else if (buffer.spec().format == OIIO::TypeDesc::HALF)
+		getRange_impl<half> (this, minimum, maximum);
+	else if (buffer.spec().format == OIIO::TypeDesc::UINT8)
+		getRange_impl<unsigned char> (this, minimum, maximum);
+	else if (buffer.spec().format == OIIO::TypeDesc::UINT16)
+		getRange_impl<unsigned short> (this, minimum, maximum);
+}
 
+
+template<typename BUFT>
+static void getAverage_impl(ImagePlaneData *plane, const int (&coords)[4])
+{
+	plane->pixelAverage[0] = 0;
+	plane->pixelAverage[1] = 0;
+	plane->pixelAverage[2] = 0;
+	plane->pixelAverage[3] = 0;
+
+	OIIO::ROI roi = plane->buffer.roi();
+
+	roi.xbegin = coords[0];
+	roi.ybegin = coords[1];
+	roi.xend   = coords[2];
+	roi.yend   = coords[3];
+
+	// Iterate over all pixels in the region...
+	for (OIIO::ImageBuf::ConstIterator<BUFT> it(plane->buffer, roi); !it.done(); ++it)
+	{
+		if (! it.exists())   // Make sure the iterator is pointing
+			continue;        //   to a pixel in the data window
+
+		int i = 0;
+		for (int c = plane->begin; c < plane->begin+plane->len;  ++c)
+		{
+			plane->pixelAverage[i] += float(it[c]);
+			i++;
+		}
+	}
+
+	int i = 0;
+	for (int c = plane->begin; c < plane->begin+plane->len;  ++c)
+	{
+		plane->pixelAverage[i] /= float(roi.npixels());
+		i++;
+	}
+}
+
+
+void ImagePlaneData::getAverage(const int (&coords)[4])
+{
+	float missing[4] = { 0.0, 0.0, 0.0, 0.0 };
+	OIIO::attribute ("missingcolor", OIIO::TypeDesc("float[4]"), &missing);
+
+	if (buffer.spec().format == OIIO::TypeDesc::FLOAT)
+		getAverage_impl<float> (this, coords);
+	else if (buffer.spec().format == OIIO::TypeDesc::HALF)
+		getAverage_impl<half> (this, coords);
+	else if (buffer.spec().format == OIIO::TypeDesc::UINT8)
+		getAverage_impl<unsigned char> (this, coords);
+	else if (buffer.spec().format == OIIO::TypeDesc::UINT16)
+		getAverage_impl<unsigned short> (this, coords);
+
+	averageIsValid = true;
 }
 
 

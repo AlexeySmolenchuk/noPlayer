@@ -215,6 +215,7 @@ NoPlayer::init(const char* fileName, bool fresh)
 		channelSoloing = 0;
 		activePlaneIdx = 0;
 		activeMIP = 0;
+		inspectArea = false;
 	}
 
 	// Preload
@@ -452,12 +453,12 @@ void NoPlayer::draw()
 
 	ImGuiIO& io = ImGui::GetIO();
 	ImGui::NewFrame();
-	float unit = ImGui::GetFontSize() * 0.5;
+	float unit = ImGui::GetFontSize() * 0.5f;
 
 	static bool help = 0;
 	help = ImGui::IsKeyDown(ImGuiKey_F1);
-	
-	if (imagePlanes.size() == 0)
+
+	if (imagePlanes.empty())
 	{
 		{
 			ImGui::SetNextWindowPos(ImVec2(unit, unit));
@@ -468,9 +469,9 @@ void NoPlayer::draw()
 			ImGui::Begin( "Info", nullptr, windowFlags);
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5, 0.5, 0.5, 1));
 
-			ImGui::Text((const char *)glGetString(GL_VENDOR));
-			ImGui::Text((const char *)glGetString(GL_RENDERER));
-			ImGui::Text((const char *)glGetString(GL_VERSION));
+			ImGui::Text((const char*)glGetString(GL_VENDOR));
+			ImGui::Text((const char*)glGetString(GL_RENDERER));
+			ImGui::Text((const char*)glGetString(GL_VERSION));
 			ImGui::Text("");
 
 			// This is OK only for static linking
@@ -502,7 +503,7 @@ void NoPlayer::draw()
 	ImagePlane &plane = imagePlanes[activePlaneIdx];
 
 	ImagePlaneData &planeData = plane.MIPs[activeMIP];
-	float compensateMIP = powf(2.0f, planeData.mip);
+	float compensateMIP = static_cast<float>(pow(2, planeData.mip));
 
 	static bool ui = true;
 	static int lag = 0;
@@ -569,7 +570,7 @@ void NoPlayer::draw()
 
 		if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket))
 		{
-			activePlaneIdx = (imagePlanes.size()+activePlaneIdx-1)%imagePlanes.size();
+			activePlaneIdx = (imagePlanes.size() + activePlaneIdx - 1) % static_cast<int>(imagePlanes.size());
 			channelSoloing = 0;
 		}
 		if (ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_Keypad9))
@@ -597,7 +598,7 @@ void NoPlayer::draw()
 			plane.gainValues = 1.0;
 			plane.offsetValues = 0.0;
 		}
-			
+
 		//Zoom in
 		if (ImGui::IsKeyPressed(ImGuiKey_KeypadAdd))
 		{
@@ -631,6 +632,7 @@ void NoPlayer::draw()
 		if (ImGui::IsKeyPressed(ImGuiKey_Minus))
 			plane.gainValues *= 0.5;
 
+		// Set Range
 		if (ImGui::IsKeyPressed(ImGuiKey_R))
 		{
 			if (channelSoloing <= planeData.len)
@@ -639,7 +641,7 @@ void NoPlayer::draw()
 					float min_value = std::numeric_limits<float>::max();
 					float max_value = std::numeric_limits<float>::lowest();
 					float t;
-				// TODO: schedule image stats upfront asynchronously 
+				// TODO: schedule image stats upfront asynchronously
 				planeData.getRange(pixel_min, pixel_max);
 
 				if (channelSoloing > 0)
@@ -650,6 +652,7 @@ void NoPlayer::draw()
 				}
 				else
 				{
+					// Should we measure A when ranging RGBA?
 					for (int i = 0; i < std::max(1, planeData.len-1); i++)
 					{
 						min_value = std::min(min_value, pixel_min[i]);
@@ -668,7 +671,10 @@ void NoPlayer::draw()
 		}
 
 		if (ImGui::IsKeyPressed(ImGuiKey_I))
+		{
 			inspect = !inspect;
+			inspectArea = false;
+		}
 
 		if (ImGui::IsKeyDown(ImGuiKey_GraveAccent))
 			setChannelSoloing(0);
@@ -688,39 +694,41 @@ void NoPlayer::draw()
 
 	if (help)
 	{
+		// TODO: Draw over inspector
 
-			static const char* helpMsg = 
-				"              Shortcuts:\n\n"
-				"` 1 2 3 4     (top row) RGB / R / G / B / A\n\n"
-				"0 - =         (top row) Exposure Reset / EV- / EV+\n\n"
-				"R             Adjust Gain and Offset to fit Range\n\n"
-				"[             Previous AOV\n\n"
-				"]             Next AOV\n\n"
-				"PgUp          Previous MIP\n\n"
-				"PgDn          Next MIP\n\n"
-				"F             Fit / 100%%\n\n"
-				"I             Inspect Tool\n\n"
-				"F5            Reload image\n\n"
-				"F11           Fullscreen\n\n"
-				"H             Hide UI\n\n"
-				"+ -           (numpad) ZoomIn / ZoomOut\n\n"
-				"Esc           Exit\n\n";
+		static const char* helpMsg =
+			"              Shortcuts:\n\n"
+			"` 1 2 3 4     (top row) RGB / R / G / B / A\n\n"
+			"0 - =         (top row) Exposure Reset / EV- / EV+\n\n"
+			"R             Adjust Gain and Offset to fit Range\n\n"
+			"[             Previous AOV\n\n"
+			"]             Next AOV\n\n"
+			"PgUp          Previous MIP\n\n"
+			"PgDn          Next MIP\n\n"
+			"F             Fit / 100%%\n\n"
+			"I             Inspect Tool\n\n"
+			"F5            Reload image\n\n"
+			"F11           Fullscreen\n\n"
+			"H             Hide UI\n\n"
+			"+ -           (numpad) ZoomIn / ZoomOut\n\n"
+			"Esc           Exit\n\n";
 
-			ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(helpMsg))/2.f);
+		ImGui::SetNextWindowPos( (ImVec2(displayW, displayH) - ImGui::CalcTextSize(helpMsg))/2.f);
 
-			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75, 0.75, 0.75, 1));
-			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.08f, 0.75f));
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75, 0.75, 0.75, 1));
+		ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.08f, 0.75f));
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
-			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
-										| ImGuiWindowFlags_AlwaysAutoResize;
+		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
+									| ImGuiWindowFlags_AlwaysAutoResize
+									| ImGuiWindowFlags_NoMouseInputs;
 
-			ImGui::Begin( "Help", nullptr, windowFlags);
-			ImGui::Text(helpMsg);
-			ImGui::End();
+		ImGui::Begin( "Help", nullptr, windowFlags);
+		ImGui::Text(helpMsg);
+		ImGui::End();
 
-			ImGui::PopStyleColor(2);
-			ImGui::PopStyleVar();
+		ImGui::PopStyleColor(2);
+		ImGui::PopStyleVar();
 	}
 	else if (ui)
 	{
@@ -728,7 +736,7 @@ void NoPlayer::draw()
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
 									| ImGuiWindowFlags_AlwaysAutoResize
 									| ImGuiWindowFlags_NoBackground;
-									;
+
 		ImGui::Begin( "Info", nullptr, windowFlags);
 		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5, 0.5, 0.5, 1));
 		// ImGui::Text("%.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
@@ -794,8 +802,8 @@ void NoPlayer::draw()
 		ImGui::End();
 
 
-		ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(1.0, 1.0, 1.0, 0.2));
-		ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(1.0, 1.0, 1.0, 0.1));
+		ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(1.0f, 1.0f, 1.0f, 0.2f));
+		ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.1f));
 		ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(1.0, 1.0, 1.0, 0.0));
 
 		ImGui::SetNextWindowPos(ImVec2(unit, unit*14));
@@ -885,8 +893,7 @@ void NoPlayer::draw()
 
 			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_None
 										| ImGuiWindowFlags_NoDecoration
-										| ImGuiWindowFlags_NoBackground
-										;
+										| ImGuiWindowFlags_NoBackground;
 
 			ImGui::SetNextWindowPos(ImVec2(displayW/2 - 34*unit, displayH - 5*unit));
 			ImGui::SetNextWindowSize(ImVec2(23*unit, 0));
@@ -939,10 +946,78 @@ void NoPlayer::draw()
 
 		ImVec2 mousePos = ImGui::GetMousePos();
 		ImVec2 coords = mousePos - ImVec2(displayW, displayH)*0.5f - ImVec2(offsetX, offsetY) + shift;
-		coords /= ImVec2(planeData.pixelAspect, 1.0) * scale * compensateMIP * factor;
-		coords += ImVec2(planeData.imageWidth, planeData.imageHeight)*0.5f - ImVec2(centerX, centerY);
+		coords /= ImVec2(planeData.pixelAspect, 1.0) * scale * factor;
 
-		if(coords.x >= 0 && coords.x < planeData.imageWidth && coords.y >= 0 && coords.y < planeData.imageHeight)
+		if (!io.WantCaptureMouse)
+		{
+			// Preserve inspectBoundingBox as float to apply to other MIPs
+			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+			{
+				inspectBoundingBox[0] = coords.x;
+				inspectBoundingBox[1] = coords.y;
+				inspectArea = false;
+
+				for(auto &plane: imagePlanes)
+					for(auto &data: plane.MIPs)
+						data.averageIsValid = false;
+			}
+			else if (ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+			{
+				inspectBoundingBox[2] = coords.x;
+				inspectBoundingBox[3] = coords.y;
+				inspectArea = true;
+				planeData.averageIsValid = false;
+			}
+		}
+		coords /= compensateMIP;
+		coords += ImVec2(planeData.imageWidth, planeData.imageHeight) * 0.5f - ImVec2(centerX, centerY);
+
+		if (inspectArea)
+		{
+			ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.05f, 0.05f, 0.05f, 0.5f));
+			ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 0.0f);
+
+			float tx = std::max(inspectBoundingBox[0], inspectBoundingBox[2]) * scale * factor * planeData.pixelAspect;
+			float ty = std::min(inspectBoundingBox[1], inspectBoundingBox[3]) * scale * factor;
+
+			tx += offsetX - shift.x + displayW * 0.5f;
+			ty += offsetY - shift.y + displayH * 0.5f;
+
+			ImGui::SetNextWindowPos(ImVec2(tx+2, ty+2));
+			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoDecoration
+										| ImGuiWindowFlags_AlwaysAutoResize
+										| ImGuiWindowFlags_Tooltip
+										| ImGuiWindowFlags_NoMouseInputs;
+
+			ImGui::Begin( "Inspect Area", nullptr, windowFlags);
+
+			int x0, y0, x1, y1;
+			x0 = static_cast<int>(floor(std::min(inspectBoundingBox[0], inspectBoundingBox[2])
+								/ compensateMIP + planeData.imageWidth * 0.5 - centerX + planeData.imageOffsetX));
+			y0 = static_cast<int>(floor(std::min(inspectBoundingBox[1], inspectBoundingBox[3])
+								/ compensateMIP + planeData.imageHeight * 0.5 - centerY + planeData.imageOffsetY));
+			x1 = static_cast<int>(ceil(std::max(inspectBoundingBox[0], inspectBoundingBox[2])
+								/ compensateMIP + planeData.imageWidth * 0.5 - centerX + planeData.imageOffsetX));
+			y1 = static_cast<int>(ceil(std::max(inspectBoundingBox[1], inspectBoundingBox[3])
+								/ compensateMIP + planeData.imageHeight * 0.5 - centerY + planeData.imageOffsetY));
+
+			ImGui::Text("(%d,%d)-(%d,%d)", std::min(x0, x1), std::min(y0, y1), std::max(x0, x1), std::max(y0, y1));
+			if (planeData.ready >= ImagePlaneData::LOADED)
+			{
+				int bbox[4] = {x0,y0,x1,y1};
+
+				if (!planeData.averageIsValid)
+					planeData.getAverage(bbox);
+
+				for (int i=0; i<planeData.len; i++)
+					ImGui::Text("%s %g",  planeData.channels.substr(i, 1).c_str(), planeData.pixelAverage[i]);
+			}
+			ImGui::End();
+			ImGui::PopStyleColor();
+			ImGui::PopStyleVar();
+		}
+
+		if(!ImGui::IsMouseDragging(ImGuiMouseButton_Left) && coords.x >= 0 && coords.x < planeData.imageWidth && coords.y >= 0 && coords.y < planeData.imageHeight)
 		{
 			ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.05f, 0.05f, 0.05f, 0.5f));
 			ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 0.0f);
@@ -953,23 +1028,21 @@ void NoPlayer::draw()
 
 			ImGui::Begin( "Inspect", nullptr, windowFlags);
 
-			// TODO: Fix rounding
-			// The pixel pointer is little off when Pixel Aspect !=1.0
 			int x, y;
-			x = (int)(coords.x + planeData.imageOffsetX);
-			y = (int)(coords.y + planeData.imageOffsetY);
+			x = static_cast<int>(floor(coords.x + planeData.imageOffsetX));
+			y = static_cast<int>(floor(coords.y + planeData.imageOffsetY));
 
 			if(planeData.windowMatchData)
 			{
-				ImGui::Text("(%d, %d)", x, y);
+				ImGui::Text("(%d,%d)", x, y);
 			}
 			else
 			{
 				// Results are not intuitive when Display Window offset applied
 				// Coordinates in Display window are used to access pixel values in OpenImageIO
-				ImGui::Text("Display: (%d, %d)", x, y);
-				ImGui::Text("Data:    (%d, %d)", (int)(coords.x - planeData.windowOffsetX),
-										(int)(coords.y - planeData.windowOffsetY));
+				ImGui::Text("Display: (%d,%d)", x, y);
+				ImGui::Text("Data:    (%d,%d)", static_cast<int>(floor(coords.x - planeData.windowOffsetX)),
+												static_cast<int>(floor(coords.y - planeData.windowOffsetY)));
 			}
 
 			if (planeData.ready >= ImagePlaneData::LOADED)
@@ -982,6 +1055,22 @@ void NoPlayer::draw()
 			ImGui::PopStyleColor();
 			ImGui::PopStyleVar();
 		}
+	}
+
+	{
+		ImGui::Begin("debug", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+		ImGui::Text("offsetX %f", offsetX);
+		ImGui::Text("offsetY %f", offsetY);
+		ImGui::Text("shift.x %f", shift.x);
+		ImGui::Text("shift.y %f", shift.y);
+		ImGui::Text("scale %f", scale);
+		ImGui::Text("factor %f", factor);
+		ImGui::Text("compensateMIP %f", compensateMIP);
+
+		ImGui::Text("inspectBoundingBox %f, %f", inspectBoundingBox[0], inspectBoundingBox[1]);
+		ImGui::Text("inspectBoundingBox %f, %f", inspectBoundingBox[2], inspectBoundingBox[3]);
+
+		ImGui::End();
 	}
 
 	ImGui::Render();
@@ -1010,7 +1099,7 @@ void NoPlayer::draw()
 		glUniform1i(glGetUniformLocation(shader, "nchannels"), planeData.len);
 		glUniform1i(glGetUniformLocation(shader, "doOCIO"), plane.doOCIO);
 		glUniform1i(glGetUniformLocation(shader, "checkNaN"), plane.checkNaN);
-		glUniform1f(glGetUniformLocation(shader, "flash"), fmodf(ImGui::GetTime(), 1.0f));
+		glUniform1f(glGetUniformLocation(shader, "flash"), static_cast<float>(fmod(ImGui::GetTime(), 1.0)));
 
 		glDisable(GL_BLEND);
 		glDisable(GL_DEPTH_TEST); // prevents framebuffer rectangle from being discarded
@@ -1030,6 +1119,45 @@ void NoPlayer::draw()
 																-(offsetY - shift.y)/(float)displayH);
 		glUniform2f(glGetUniformLocation(frameShader, "scale"), scale * factor * compensateMIP * planeData.windowWidth/(float)displayW * planeData.pixelAspect,
 																scale * factor * compensateMIP * planeData.windowHeight/(float)displayH);
+
+		glUniform1f(glGetUniformLocation(frameShader, "time"), 0);
+		glUniform1f(glGetUniformLocation(frameShader, "alpha"), 0.25f);
+		glBindVertexArray(VAO);
+		glDrawArrays(GL_LINE_LOOP, 0, 4);
+		glBindVertexArray(0);
+		glUseProgram(0);
+	}
+
+	if (inspectArea)
+	{
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+		glUseProgram(frameShader);
+
+		float x0, y0, x1, y1;
+		int cx = planeData.windowWidth % 2;
+		int cy = planeData.windowHeight % 2;
+		
+		// TODO: Compensate for odd resolutions MIPs e.g. "Bonita.exr"
+		// Snap area to pixels border
+		x0 = floor((std::min(inspectBoundingBox[0], inspectBoundingBox[2]) - 0.5f * cx) / compensateMIP) * compensateMIP;
+		y0 = floor((std::min(inspectBoundingBox[1], inspectBoundingBox[3]) - 0.5f * cy) / compensateMIP) * compensateMIP;
+		x1 = ceil((std::max(inspectBoundingBox[0], inspectBoundingBox[2]) - 0.5f * cx) / compensateMIP) * compensateMIP;
+		y1 = ceil((std::max(inspectBoundingBox[1], inspectBoundingBox[3]) - 0.5f * cy) / compensateMIP) * compensateMIP;
+
+		float tx = (x0 + x1 + cx) * 0.5f * scale * factor * planeData.pixelAspect;
+		float ty = (y0 + y1 + cy) * 0.5f * scale * factor;
+		
+		float sx = x1 - x0;
+		float sy = y1 - y0;
+
+		glUniform2f(glGetUniformLocation(frameShader, "offset"), (offsetX - shift.x + tx)/(float)displayW,
+																-(offsetY - shift.y + ty)/(float)displayH);
+		glUniform2f(glGetUniformLocation(frameShader, "scale"), sx * scale * factor / (float)displayW * planeData.pixelAspect,
+																sy * scale * factor / (float)displayH);
+
+		glUniform1f(glGetUniformLocation(frameShader, "time"), static_cast<float>(fmod(ImGui::GetTime(), 1.0f)));
+		glUniform1f(glGetUniformLocation(frameShader, "alpha"), 0.5f);
 		glBindVertexArray(VAO);
 		glDrawArrays(GL_LINE_LOOP, 0, 4);
 		glBindVertexArray(0);

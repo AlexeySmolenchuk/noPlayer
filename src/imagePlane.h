@@ -28,6 +28,7 @@ struct ImagePlaneData
 	bool load();
 	bool generateGlTexture();
 	void getRange(float*, float*);
+	void getAverage(const int (&bb)[4]);
 
 	std::string imageFileName;
 	unsigned int subimage;	// index for async loading
@@ -76,6 +77,9 @@ struct ImagePlaneData
 
 	OIIO::ImageBuf buffer;
 	std::shared_ptr<OIIO::ImageCache> cache;
+
+	bool averageIsValid = false;
+	float pixelAverage[4] = {0};
 };
 
 

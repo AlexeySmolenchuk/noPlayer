@@ -103,14 +103,19 @@ private:
 	std::string frameFragmentShaderCode = R"glsl(
 		#version 330 core
 		out vec4 FragColor;
+		uniform float time;
+		uniform float alpha;
 		void main() {
-			float dashed = (int(gl_FragCoord.x/3) + int(gl_FragCoord.y/3)) % 2;
-			FragColor = vec4(vec3(1.0) * dashed, 0.25);
+			// Marching ants
+			float dashed = (int( int(-time*24)+gl_FragCoord.x + gl_FragCoord.y)/3) % 2;
+			FragColor = vec4(vec3(1.0) * dashed, alpha);
 		}
 	)glsl";
 
 	int channelSoloing = 0;
 	bool inspect = false;
+	bool inspectArea = false;
+	float inspectBoundingBox[4] = {0};
 
 	bool fullScreen = false;
 
