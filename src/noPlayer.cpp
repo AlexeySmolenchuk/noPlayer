@@ -1057,21 +1057,21 @@ void NoPlayer::draw()
 		}
 	}
 
-	{
-		ImGui::Begin("debug", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-		ImGui::Text("offsetX %f", offsetX);
-		ImGui::Text("offsetY %f", offsetY);
-		ImGui::Text("shift.x %f", shift.x);
-		ImGui::Text("shift.y %f", shift.y);
-		ImGui::Text("scale %f", scale);
-		ImGui::Text("factor %f", factor);
-		ImGui::Text("compensateMIP %f", compensateMIP);
+	// {
+	// 	ImGui::Begin("debug", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+	// 	ImGui::Text("offsetX %f", offsetX);
+	// 	ImGui::Text("offsetY %f", offsetY);
+	// 	ImGui::Text("shift.x %f", shift.x);
+	// 	ImGui::Text("shift.y %f", shift.y);
+	// 	ImGui::Text("scale %f", scale);
+	// 	ImGui::Text("factor %f", factor);
+	// 	ImGui::Text("compensateMIP %f", compensateMIP);
 
-		ImGui::Text("inspectBoundingBox %f, %f", inspectBoundingBox[0], inspectBoundingBox[1]);
-		ImGui::Text("inspectBoundingBox %f, %f", inspectBoundingBox[2], inspectBoundingBox[3]);
+	// 	ImGui::Text("inspectBoundingBox %f, %f", inspectBoundingBox[0], inspectBoundingBox[1]);
+	// 	ImGui::Text("inspectBoundingBox %f, %f", inspectBoundingBox[2], inspectBoundingBox[3]);
 
-		ImGui::End();
-	}
+	// 	ImGui::End();
+	// }
 
 	ImGui::Render();
 
