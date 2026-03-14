@@ -946,7 +946,7 @@ void NoPlayer::draw()
 
 		ImVec2 mousePos = ImGui::GetMousePos();
 		ImVec2 coords = mousePos - ImVec2(displayW, displayH)*0.5f - ImVec2(offsetX, offsetY) + shift;
-		coords /= ImVec2(planeData.pixelAspect, 1.0) * scale * compensateMIP * factor;
+		coords /= ImVec2(planeData.pixelAspect, 1.0) * scale * factor;
 
 		if (!io.WantCaptureMouse)
 		{
@@ -969,7 +969,7 @@ void NoPlayer::draw()
 				planeData.averageIsValid = false;
 			}
 		}
-
+		coords /= compensateMIP;
 		coords += ImVec2(planeData.imageWidth, planeData.imageHeight) * 0.5f - ImVec2(centerX, centerY);
 
 		if (inspectArea)
@@ -992,10 +992,14 @@ void NoPlayer::draw()
 			ImGui::Begin( "Inspect Area", nullptr, windowFlags);
 
 			int x0, y0, x1, y1;
-			x0 = static_cast<int>(inspectBoundingBox[0] + planeData.imageWidth * 0.5 - centerX + planeData.imageOffsetX);
-			y0 = static_cast<int>(inspectBoundingBox[1] + planeData.imageHeight * 0.5 - centerY + planeData.imageOffsetY);
-			x1 = static_cast<int>(inspectBoundingBox[2] + planeData.imageWidth * 0.5 - centerX + planeData.imageOffsetX);
-			y1 = static_cast<int>(inspectBoundingBox[3] + planeData.imageHeight * 0.5 - centerY + planeData.imageOffsetY);
+			x0 = static_cast<int>(floor(std::min(inspectBoundingBox[0], inspectBoundingBox[2])
+								/ compensateMIP + planeData.imageWidth * 0.5 - centerX + planeData.imageOffsetX));
+			y0 = static_cast<int>(floor(std::min(inspectBoundingBox[1], inspectBoundingBox[3])
+								/ compensateMIP + planeData.imageHeight * 0.5 - centerY + planeData.imageOffsetY));
+			x1 = static_cast<int>(ceil(std::max(inspectBoundingBox[0], inspectBoundingBox[2])
+								/ compensateMIP + planeData.imageWidth * 0.5 - centerX + planeData.imageOffsetX));
+			y1 = static_cast<int>(ceil(std::max(inspectBoundingBox[1], inspectBoundingBox[3])
+								/ compensateMIP + planeData.imageHeight * 0.5 - centerY + planeData.imageOffsetY));
 
 			ImGui::Text("(%d,%d)-(%d,%d)", std::min(x0, x1), std::min(y0, y1), std::max(x0, x1), std::max(y0, y1));
 			if (planeData.ready >= ImagePlaneData::LOADED)
@@ -1130,11 +1134,22 @@ void NoPlayer::draw()
 		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 		glUseProgram(frameShader);
 
-		float tx = (inspectBoundingBox[2] + inspectBoundingBox[0])/2.0f * scale * factor * planeData.pixelAspect;
-		float ty = (inspectBoundingBox[3] + inspectBoundingBox[1])/2.0f * scale * factor;
+		float x0, y0, x1, y1;
+		int cx = planeData.windowWidth % 2;
+		int cy = planeData.windowHeight % 2;
+		
+		// TODO: Compensate for odd resolutions MIPs e.g. "Bonita.exr"
+		// Snap area to pixels border
+		x0 = floor((std::min(inspectBoundingBox[0], inspectBoundingBox[2]) - 0.5f * cx) / compensateMIP) * compensateMIP;
+		y0 = floor((std::min(inspectBoundingBox[1], inspectBoundingBox[3]) - 0.5f * cy) / compensateMIP) * compensateMIP;
+		x1 = ceil((std::max(inspectBoundingBox[0], inspectBoundingBox[2]) - 0.5f * cx) / compensateMIP) * compensateMIP;
+		y1 = ceil((std::max(inspectBoundingBox[1], inspectBoundingBox[3]) - 0.5f * cy) / compensateMIP) * compensateMIP;
 
-		float sx = (inspectBoundingBox[2] - inspectBoundingBox[0]);
-		float sy = (inspectBoundingBox[3] - inspectBoundingBox[1]);
+		float tx = (x0 + x1 + cx) * 0.5f * scale * factor * planeData.pixelAspect;
+		float ty = (y0 + y1 + cy) * 0.5f * scale * factor;
+		
+		float sx = x1 - x0;
+		float sy = y1 - y0;
 
 		glUniform2f(glGetUniformLocation(frameShader, "offset"), (offsetX - shift.x + tx)/(float)displayW,
 																-(offsetY - shift.y + ty)/(float)displayH);

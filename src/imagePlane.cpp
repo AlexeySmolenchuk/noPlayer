@@ -111,10 +111,11 @@ static void getAverage_impl(ImagePlaneData *plane, const int (&coords)[4])
 	plane->pixelAverage[3] = 0;
 
 	OIIO::ROI roi = plane->buffer.roi();
-	roi.xbegin = std::min(coords[0],coords[2]);
-	roi.xend   = std::max(coords[0],coords[2]);
-	roi.ybegin = std::min(coords[1],coords[3]);
-	roi.yend   = std::max(coords[1],coords[3]);
+
+	roi.xbegin = coords[0];
+	roi.ybegin = coords[1];
+	roi.xend   = coords[2];
+	roi.yend   = coords[3];
 
 	// Iterate over all pixels in the region...
 	for (OIIO::ImageBuf::ConstIterator<BUFT> it(plane->buffer, roi); !it.done(); ++it)
